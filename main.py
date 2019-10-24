@@ -30,10 +30,14 @@ import numpy as np
 import pickle
 import random
 import tensorflow as tf
+import matplotlib.pyplot as plt
 
 from data_generator import DataGenerator
 from maml import MAML
 from tensorflow.python.platform import flags
+
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 FLAGS = flags.FLAGS
 
@@ -41,6 +45,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string('datasource', 'sinusoid', 'sinusoid or omniglot or miniimagenet')
 flags.DEFINE_integer('num_classes', 5, 'number of classes used in classification (e.g. 5-way classification).')
 # oracle means task id is input (only suitable for sinusoid)
+# flags.DEFINE_string('baseline', "oracle", 'oracle, or None')
 flags.DEFINE_string('baseline', None, 'oracle, or None')
 
 ## Training options
@@ -50,6 +55,7 @@ flags.DEFINE_integer('meta_batch_size', 25, 'number of tasks sampled per meta-up
 flags.DEFINE_float('meta_lr', 0.001, 'the base learning rate of the generator')
 flags.DEFINE_integer('update_batch_size', 5, 'number of examples used for inner gradient update (K for K-shot learning).')
 flags.DEFINE_float('update_lr', 1e-3, 'step size alpha for inner gradient update.') # 0.1 for omniglot
+# flags.DEFINE_float('update_lr', 1e-2, 'step size alpha for inner gradient update.') # 0.1 for omniglot
 flags.DEFINE_integer('num_updates', 1, 'number of inner gradient updates during training.')
 
 ## Model options
@@ -62,8 +68,8 @@ flags.DEFINE_bool('stop_grad', False, 'if True, do not use second derivatives in
 ## Logging, saving, and testing options
 flags.DEFINE_bool('log', True, 'if false, do not log summaries, for debugging code.')
 flags.DEFINE_string('logdir', '/tmp/data', 'directory for summaries and checkpoints.')
-flags.DEFINE_bool('resume', True, 'resume training if there is a model available')
-flags.DEFINE_bool('train', True, 'True to train, False to test.')
+flags.DEFINE_bool('resume', False, 'resume training if there is a model available')
+flags.DEFINE_bool('train', False, 'True to train, False to test.')
 flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest model)')
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')
@@ -161,6 +167,90 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
 
 # calculated for omniglot
 NUM_TEST_POINTS = 600
+
+def generate_test():
+    batch_size = 2
+    num_points = 101
+    amp = np.array([3, 5])
+    phase = np.array([0, 2.3])
+    outputs = np.zeros([batch_size, num_points, 1])
+    init_inputs = np.zeros([batch_size, num_points, 1])
+    for func in range(batch_size):
+        init_inputs[func, :, 0] = np.linspace(-5, 5, num_points)
+        outputs[func] = amp[func] * np.sin(init_inputs[func] - phase[func])
+
+    if FLAGS.baseline == 'oracle':  # NOTE - this flag is specific to sinusoid
+        init_inputs = np.concatenate([init_inputs, np.zeros([init_inputs.shape[0], init_inputs.shape[1], 2])], 2)
+        for i in range(batch_size):
+            init_inputs[i, :, 1] = amp[i]
+            init_inputs[i, :, 2] = phase[i]
+
+    return init_inputs, outputs, amp, phase
+
+def test_line_limit(model, sess, exp_string, num_train=10, random_seed=1999):
+
+    inputs_all, outputs_all, amp_test, phase_test = generate_test()
+    np.random.seed(random_seed)
+    index = np.random.choice(inputs_all.shape[1], [inputs_all.shape[0], num_train], replace=False)
+    inputs_a = np.zeros([inputs_all.shape[0], num_train, inputs_all.shape[2]])
+    outputs_a = np.zeros([outputs_all.shape[0], num_train, outputs_all.shape[2]])
+    for line in range(len(index)):
+        inputs_a[line] = inputs_all[line, index[line], :]
+        outputs_a[line] = outputs_all[line, index[line], :]
+    feed_dict_line = {model.inputa: inputs_a, model.inputb: inputs_all,  model.labela: outputs_a, model.labelb: outputs_all, model.meta_lr: 0.0}
+    predictions_all = sess.run([model.outputas, model.outputbs], feed_dict_line)
+    print("shape of predictions_all is: ", predictions_all[0].shape)
+
+    for line in range(len(inputs_all)):
+        plt.figure()
+        plt.plot(inputs_all[line, ..., 0].squeeze(), outputs_all[line, ..., 0].squeeze(), "r-", label="ground_truth")
+        for update_step in range(len(predictions_all[1])):
+            plt.plot(inputs_all[line, ..., 0].squeeze(), predictions_all[1][update_step][line, ...].squeeze(), "--", label="update_step_{:d}".format(update_step))
+        plt.legend()
+
+        out_figure = FLAGS.logdir + '/' + exp_string + '/' + 'test_ubs' + str(
+            FLAGS.update_batch_size) + '_stepsize' + str(FLAGS.update_lr) + 'line_{0:d}_numtrain_{1:d}_seed_{2:d}.png'.format(line, num_train, random_seed)
+        plt.plot(inputs_a[line, :, 0], outputs_a[line, :, 0], "b*", label="training points")
+
+        plt.savefig(out_figure, bbox_inches="tight", dpi=300)
+        plt.close()
+
+def test_line(model, sess, exp_string):
+
+    inputs_all, outputs_all, amp_test, phase_test = generate_test()
+
+
+    feed_dict_line = {model.inputa: inputs_all, model.inputb: inputs_all,  model.labela: outputs_all, model.labelb: outputs_all, model.meta_lr: 0.0}
+    predictions_all = sess.run([model.outputas, model.outputbs], feed_dict_line)
+    print("shape of predictions_all is: ", predictions_all[0].shape)
+
+    for line in range(len(inputs_all)):
+        plt.figure()
+        plt.plot(inputs_all[line, ..., 0].squeeze(), outputs_all[line, ..., 0].squeeze(), "r-", label="ground_truth")
+        for update_step in range(len(predictions_all[1])):
+            plt.plot(inputs_all[line, ..., 0].squeeze(), predictions_all[1][update_step][line, ...].squeeze(), "--", label="update_step_{:d}".format(update_step))
+        plt.legend()
+
+        out_figure = FLAGS.logdir + '/' + exp_string + '/' + 'test_ubs' + str(
+            FLAGS.update_batch_size) + '_stepsize' + str(FLAGS.update_lr) + 'line_{0:d}.png'.format(line)
+
+        plt.savefig(out_figure, bbox_inches="tight", dpi=300)
+        plt.close()
+
+    # for line in range(len(inputs_all)):
+    #     plt.figure()
+    #     plt.plot(inputs_all[line, ..., 0].squeeze(), outputs_all[line, ..., 0].squeeze(), "r-", label="ground_truth")
+    #
+    #     plt.plot(inputs_all[line, ..., 0].squeeze(), predictions_all[0][line, ...].squeeze(), "--",
+    #              label="initial")
+    #     plt.legend()
+    #
+    #     out_figure = FLAGS.logdir + '/' + exp_string + '/' + 'test_ubs' + str(
+    #         FLAGS.update_batch_size) + '_stepsize' + str(FLAGS.update_lr) + 'init_line_{0:d}.png'.format(line)
+    #
+    #     plt.savefig(out_figure, bbox_inches="tight", dpi=300)
+    #     plt.close()
+
 
 def test(model, saver, sess, exp_string, data_generator, test_num_updates=None):
     num_classes = data_generator.num_classes # for classification, 1 otherwise
@@ -322,6 +412,10 @@ def main():
         exp_string += 'nonorm'
     else:
         print('Norm setting not recognized.')
+    if FLAGS.pretrain_iterations != 0:
+        exp_string += '.pt' + str(FLAGS.pretrain_iterations)
+    if FLAGS.metatrain_iterations != 0:
+        exp_string += '.mt' + str(FLAGS.metatrain_iterations)
 
     resume_itr = 0
     model_file = None
@@ -330,7 +424,11 @@ def main():
     tf.train.start_queue_runners()
 
     if FLAGS.resume or not FLAGS.train:
-        model_file = tf.train.latest_checkpoint(FLAGS.logdir + '/' + exp_string)
+        if exp_string == 'cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000':
+            model_file = 'logs/sine//cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000/model69999'
+        else:
+            model_file = tf.train.latest_checkpoint(FLAGS.logdir + '/' + exp_string)
+        # model_file = 'logs/sine//cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000/model69999'
         if FLAGS.test_iter > 0:
             model_file = model_file[:model_file.index('model')] + 'model' + str(FLAGS.test_iter)
         if model_file:
@@ -342,7 +440,26 @@ def main():
     if FLAGS.train:
         train(model, saver, sess, exp_string, data_generator, resume_itr)
     else:
-        test(model, saver, sess, exp_string, data_generator, test_num_updates)
+        # test_line(model, sess, exp_string)
+        test_line_limit(model, sess, exp_string, num_train=2, random_seed=1999)
+        # test(model, saver, sess, exp_string, data_generator, test_num_updates)
 
 if __name__ == "__main__":
     main()
+
+
+# import matplotlib.pyplot as plt
+# plt.plot(inputa.squeeze(), labela.squeeze(), "*")
+# re = sess.run(model.result, feed_dict)
+# plt.plot(inputa.squeeze(), re[0].squeeze(), "*")
+# plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/maml/preda.png", bbox_inches="tight", dpi=300)
+# for i in range(len(re[1])):
+#     plt.figure()
+#     plt.plot(inputb.squeeze(), labelb.squeeze(), "*")
+#     plt.plot(inputb.squeeze(), re[1][i].squeeze(), "*")
+#     plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/maml/predb_{:d}.png".format(i), bbox_inches="tight", dpi=300)
+#     plt.close()
+
+# plt.figure()
+# plt.imshow(metaval_accuracies)
+# plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/maml/losses.png", bbox_inches="tight", dpi=300)

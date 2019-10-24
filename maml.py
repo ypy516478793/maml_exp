@@ -130,6 +130,9 @@ class MAML:
             else:
                 outputas, outputbs, lossesa, lossesb  = result
 
+            self.lossesb = lossesb
+            self.result = result
+
         ## Performance & Optimization
         if 'train' in prefix:
             self.total_loss1 = total_loss1 = tf.reduce_sum(lossesa) / tf.to_float(FLAGS.meta_batch_size)
