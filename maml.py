@@ -23,6 +23,7 @@ class MAML:
         self.meta_lr = tf.placeholder_with_default(FLAGS.meta_lr, ())
         self.classification = False
         self.test_num_updates = test_num_updates
+        self.keep_prob = FLAGS.keep_prob
         if FLAGS.datasource == 'sinusoid':
             self.dim_hidden = [40, 40]
             self.loss_func = mse
@@ -84,7 +85,7 @@ class MAML:
                 if self.classification:
                     task_accuraciesb = []
 
-                task_outputa = self.forward(inputa, weights, reuse=reuse)  # only reuse on the first iter
+                task_outputa = self.forward(inputa, weights, reuse=reuse, keep_prob=self.keep_prob)  # only reuse on the first iter
                 task_lossa = self.loss_func(task_outputa, labela)
 
                 grads = tf.gradients(task_lossa, list(weights.values()))
@@ -92,18 +93,18 @@ class MAML:
                     grads = [tf.stop_gradient(grad) for grad in grads]
                 gradients = dict(zip(weights.keys(), grads))
                 fast_weights = dict(zip(weights.keys(), [weights[key] - self.update_lr*gradients[key] for key in weights.keys()]))
-                output = self.forward(inputb, fast_weights, reuse=True)
+                output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
                 task_outputbs.append(output)
                 task_lossesb.append(self.loss_func(output, labelb))
 
                 for j in range(num_updates - 1):
-                    loss = self.loss_func(self.forward(inputa, fast_weights, reuse=True), labela)
+                    loss = self.loss_func(self.forward(inputa, fast_weights, reuse=True, keep_prob=self.keep_prob), labela)
                     grads = tf.gradients(loss, list(fast_weights.values()))
                     if FLAGS.stop_grad:
                         grads = [tf.stop_gradient(grad) for grad in grads]
                     gradients = dict(zip(fast_weights.keys(), grads))
                     fast_weights = dict(zip(fast_weights.keys(), [fast_weights[key] - self.update_lr*gradients[key] for key in fast_weights.keys()]))
-                    output = self.forward(inputb, fast_weights, reuse=True)
+                    output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
                     task_outputbs.append(output)
                     task_lossesb.append(self.loss_func(output, labelb))
 
@@ -179,10 +180,12 @@ class MAML:
         weights['b'+str(len(self.dim_hidden)+1)] = tf.Variable(tf.zeros([self.dim_output]))
         return weights
 
-    def forward_fc(self, inp, weights, reuse=False):
+    def forward_fc(self, inp, weights, reuse=False, keep_prob=None):
         hidden = normalize(tf.matmul(inp, weights['w1']) + weights['b1'], activation=tf.nn.relu, reuse=reuse, scope='0')
         for i in range(1,len(self.dim_hidden)):
             hidden = normalize(tf.matmul(hidden, weights['w'+str(i+1)]) + weights['b'+str(i+1)], activation=tf.nn.relu, reuse=reuse, scope=str(i+1))
+            if keep_prob is not None:
+                hidden = tf.nn.dropout(hidden,  keep_prob=keep_prob)
         return tf.matmul(hidden, weights['w'+str(len(self.dim_hidden)+1)]) + weights['b'+str(len(self.dim_hidden)+1)]
 
     def construct_conv_weights(self):

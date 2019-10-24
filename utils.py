@@ -23,7 +23,7 @@ def get_images(paths, labels, nb_samples=None, shuffle=True):
     return images
 
 ## Network helpers
-def conv_block(inp, cweight, bweight, reuse, scope, activation=tf.nn.relu, max_pool_pad='VALID', residual=False):
+def conv_block(inp, cweight, bweight, reuse, scope, activation=tf.nn.relu, max_pool_pad='VALID', residual=False, keep_prob=None):
     """ Perform, conv, batch norm, nonlinearity, and max pool """
     stride, no_stride = [1,2,2,1], [1,1,1,1]
 
@@ -34,6 +34,8 @@ def conv_block(inp, cweight, bweight, reuse, scope, activation=tf.nn.relu, max_p
     normed = normalize(conv_output, activation, reuse, scope)
     if FLAGS.max_pool:
         normed = tf.nn.max_pool(normed, stride, stride, max_pool_pad)
+    if keep_prob is not None:
+        normed = tf.nn.dropout(normed, keep_prob=keep_prob)
     return normed
 
 def normalize(inp, activation, reuse, scope):
