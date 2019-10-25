@@ -37,7 +37,7 @@ from maml import MAML
 from tensorflow.python.platform import flags
 
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0git '
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 FLAGS = flags.FLAGS
 
@@ -71,7 +71,7 @@ flags.DEFINE_float('keep_prob', 0.5, 'if not None, used as keep_prob for all lay
 flags.DEFINE_bool('log', True, 'if false, do not log summaries, for debugging code.')
 flags.DEFINE_string('logdir', '/tmp/data', 'directory for summaries and checkpoints.')
 flags.DEFINE_bool('resume', False, 'resume training if there is a model available')
-flags.DEFINE_bool('train', True, 'True to train, False to test.')
+flags.DEFINE_bool('train', False, 'True to train, False to test.')
 flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest model)')
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')
@@ -173,8 +173,10 @@ NUM_TEST_POINTS = 600
 def generate_test():
     batch_size = 2
     num_points = 101
-    amp = np.array([3, 5])
-    phase = np.array([0, 2.3])
+    # amp = np.array([3, 5])
+    # phase = np.array([0, 2.3])
+    amp = np.array([5, 3])
+    phase = np.array([2.3, 0])
     outputs = np.zeros([batch_size, num_points, 1])
     init_inputs = np.zeros([batch_size, num_points, 1])
     for func in range(batch_size):
@@ -188,6 +190,47 @@ def generate_test():
             init_inputs[i, :, 2] = phase[i]
 
     return init_inputs, outputs, amp, phase
+
+def test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999):
+
+    inputs_all, outputs_all, amp_test, phase_test = generate_test()
+    np.random.seed(random_seed)
+    index = np.random.choice(inputs_all.shape[1], [inputs_all.shape[0], points_train], replace=False)
+    inputs_a = np.zeros([inputs_all.shape[0], points_train, inputs_all.shape[2]])
+    outputs_a = np.zeros([outputs_all.shape[0], points_train, outputs_all.shape[2]])
+    for line in range(len(index)):
+        inputs_a[line] = inputs_all[line, index[line], :]
+        outputs_a[line] = outputs_all[line, index[line], :]
+    feed_dict_line = {model.inputa: inputs_a, model.inputb: inputs_all,  model.labela: outputs_a, model.labelb: outputs_all, model.meta_lr: 0.0}
+
+    mc_prediction = []
+    for mc_iter in range(mc_simulation):
+        predictions_all = sess.run(model.outputbs, feed_dict_line)
+        mc_prediction.append(np.array(predictions_all))
+    print("total mc simulation: ", mc_simulation)
+    print("shape of predictions_all is: ", predictions_all[0].shape)
+
+    prob_mean = np.nanmean(mc_prediction, axis=0)
+    prob_variance = np.var(mc_prediction, axis=0)
+
+    for line in range(len(inputs_all)):
+        plt.figure()
+        plt.plot(inputs_all[line, ..., 0].squeeze(), outputs_all[line, ..., 0].squeeze(), "r-", label="ground_truth")
+        # for update_step in range(len(predictions_all)):
+        for update_step in [0, len(predictions_all)-1]:
+            X = inputs_all[line, ..., 0].squeeze()
+            mu = prob_mean[update_step][line, ...].squeeze()
+            uncertainty = np.sqrt(prob_variance[update_step][line, ...].squeeze())
+            plt.plot(X, mu, "--", label="update_step_{:d}".format(update_step))
+            plt.fill_between(X, mu + uncertainty, mu - uncertainty, alpha=0.1)
+        plt.legend()
+
+        out_figure = FLAGS.logdir + '/' + exp_string + '/' + 'test_ubs' + str(
+            FLAGS.update_batch_size) + '_stepsize' + str(FLAGS.update_lr) + 'line_{0:d}_numtrain_{1:d}_seed_{2:d}.png'.format(line, points_train, random_seed)
+        plt.plot(inputs_a[line, :, 0], outputs_a[line, :, 0], "b*", label="training points")
+
+        plt.savefig(out_figure, bbox_inches="tight", dpi=300)
+        plt.close()
 
 def test_line_limit(model, sess, exp_string, num_train=10, random_seed=1999):
 
@@ -445,7 +488,8 @@ def main():
         train(model, saver, sess, exp_string, data_generator, resume_itr)
     else:
         # test_line(model, sess, exp_string)
-        test_line_limit(model, sess, exp_string, num_train=2, random_seed=1999)
+        # test_line_limit(model, sess, exp_string, num_train=2, random_seed=1999)
+        test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999)
         # test(model, saver, sess, exp_string, data_generator, test_num_updates)
 
 if __name__ == "__main__":
@@ -467,3 +511,26 @@ if __name__ == "__main__":
 # plt.figure()
 # plt.imshow(metaval_accuracies)
 # plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/maml/losses.png", bbox_inches="tight", dpi=300)
+
+
+## Generate all sine
+# def generate_test():
+#     amp_range = [0.1, 5.0]
+#     phase_range = [0, np.pi]
+#     batch_size = 100
+#     num_points = 101
+#     # amp = np.array([3, 5])
+#     # phase = np.array([0, 2.3])
+#     amp = np.random.uniform(amp_range[0], amp_range[1], [batch_size])
+#     phase = np.random.uniform(phase_range[0], phase_range[1], [batch_size])
+#     outputs = np.zeros([batch_size, num_points, 1])
+#     init_inputs = np.zeros([batch_size, num_points, 1])
+#     for func in range(batch_size):
+#         init_inputs[func, :, 0] = np.linspace(-5, 5, num_points)
+#         outputs[func] = amp[func] * np.sin(init_inputs[func] - phase[func])
+#     return init_inputs, outputs, amp, phase
+# init_inputs, outputs, amp, phase = generate_test()
+# plt.figure()
+# for i in range(len(init_inputs)):
+#     plt.plot(init_inputs[i].squeeze(), outputs[i].squeeze())
+
