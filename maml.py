@@ -27,7 +27,10 @@ class MAML:
         if FLAGS.datasource == 'sinusoid':
             self.dim_hidden = [40, 40]
             self.loss_func = mse
-            self.forward = self.forward_fc
+            if FLAGS.drop_connect == True:
+                self.forward = self.forward_fc_dropconnect
+            else:
+                self.forward = self.forward_fc
             self.construct_weights = self.construct_fc_weights
         elif FLAGS.datasource == 'omniglot' or FLAGS.datasource == 'miniimagenet':
             self.loss_func = xent
@@ -182,10 +185,38 @@ class MAML:
 
     def forward_fc(self, inp, weights, reuse=False, keep_prob=None):
         hidden = normalize(tf.matmul(inp, weights['w1']) + weights['b1'], activation=tf.nn.relu, reuse=reuse, scope='0')
+        if keep_prob is not None:
+            hidden = tf.nn.dropout(hidden, keep_prob=keep_prob)
         for i in range(1,len(self.dim_hidden)):
             hidden = normalize(tf.matmul(hidden, weights['w'+str(i+1)]) + weights['b'+str(i+1)], activation=tf.nn.relu, reuse=reuse, scope=str(i+1))
             if keep_prob is not None:
                 hidden = tf.nn.dropout(hidden,  keep_prob=keep_prob)
+        return tf.matmul(hidden, weights['w'+str(len(self.dim_hidden)+1)]) + weights['b'+str(len(self.dim_hidden)+1)]
+
+    def forward_fc_dropconnect(self, inp, weights, reuse=False, keep_prob=None):
+        if keep_prob is not None:
+            shape_w1 = weights['w1'].shape
+            shape_b1 = weights['b1'].shape
+            drop_weights_w1 = tf.nn.dropout(weights['w1'], keep_prob=keep_prob) * keep_prob
+            drop_weights_b1 = tf.nn.dropout(weights['b1'], keep_prob=keep_prob) * keep_prob
+            weights_w1 = tf.reshape(drop_weights_w1, shape=shape_w1)
+            weights_b1 = tf.reshape(drop_weights_b1, shape=shape_b1)
+            hidden = normalize(tf.matmul(inp, weights_w1) + weights_b1, activation=tf.nn.relu, reuse=reuse, scope='0')
+        else:
+            hidden = normalize(tf.matmul(inp, weights['w1']) + weights['b1'], activation=tf.nn.relu, reuse=reuse, scope='0')
+        for i in range(1,len(self.dim_hidden)):
+            if keep_prob is not None:
+                shape_w_i = weights['w'+str(i+1)].shape
+                shape_b_i = weights['b'+str(i+1)].shape
+                drop_weights_w_i = tf.nn.dropout(weights['w'+str(i+1)], keep_prob=keep_prob) * keep_prob
+                drop_weights_b_i = tf.nn.dropout(weights['b'+str(i+1)], keep_prob=keep_prob) * keep_prob
+                weights_w_i = tf.reshape(drop_weights_w_i, shape=shape_w_i)
+                weights_b_i = tf.reshape(drop_weights_b_i, shape=shape_b_i)
+                hidden = normalize(tf.matmul(inp, weights_w_i) + weights_b_i, activation=tf.nn.relu, reuse=reuse, scope=str(i+1))
+            else:
+                hidden = tf.nn.dropout(hidden,  keep_prob=keep_prob)
+            hidden = normalize(tf.matmul(hidden, weights['w'+str(i+1)]) + weights['b'+str(i+1)], activation=tf.nn.relu, reuse=reuse, scope=str(i+1))
+
         return tf.matmul(hidden, weights['w'+str(len(self.dim_hidden)+1)]) + weights['b'+str(len(self.dim_hidden)+1)]
 
     def construct_conv_weights(self):
