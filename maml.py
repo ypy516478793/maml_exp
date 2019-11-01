@@ -185,9 +185,9 @@ class MAML:
 
     def forward_fc(self, inp, weights, reuse=False, keep_prob=None):
         hidden = normalize(tf.matmul(inp, weights['w1']) + weights['b1'], activation=tf.nn.relu, reuse=reuse, scope='0')
-        if keep_prob is not None:
-            hidden = tf.nn.dropout(hidden, keep_prob=keep_prob)
-        for i in range(1,len(self.dim_hidden)):
+        # if keep_prob is not None:                     ##
+        #     hidden = tf.nn.dropout(hidden, keep_prob=keep_prob)               ##
+        for i in range(1,len(self.dim_hidden)):  ## self.dim_hidden = 2
             hidden = normalize(tf.matmul(hidden, weights['w'+str(i+1)]) + weights['b'+str(i+1)], activation=tf.nn.relu, reuse=reuse, scope=str(i+1))
             if keep_prob is not None:
                 hidden = tf.nn.dropout(hidden,  keep_prob=keep_prob)

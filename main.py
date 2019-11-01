@@ -35,6 +35,7 @@ import matplotlib.pyplot as plt
 from data_generator import DataGenerator
 from maml import MAML
 from tensorflow.python.platform import flags
+from tqdm import tqdm
 
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -65,14 +66,14 @@ flags.DEFINE_bool('conv', True, 'whether or not to use a convolutional network, 
 flags.DEFINE_bool('max_pool', False, 'Whether or not to use max pooling rather than strided convolutions')
 flags.DEFINE_bool('stop_grad', False, 'if True, do not use second derivatives in meta-optimization (for speed)')
 flags.DEFINE_float('keep_prob', 0.5, 'if not None, used as keep_prob for all layers')
-flags.DEFINE_bool('drop_connect', True, 'if True, use dropconnect, otherwise, use dropout')
+flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, use dropout')
 # flags.DEFINE_float('keep_prob', None, 'if not None, used as keep_prob for all layers')
 
 ## Logging, saving, and testing options
 flags.DEFINE_bool('log', True, 'if false, do not log summaries, for debugging code.')
 flags.DEFINE_string('logdir', '/tmp/data', 'directory for summaries and checkpoints.')
 flags.DEFINE_bool('resume', False, 'resume training if there is a model available')
-flags.DEFINE_bool('train', True, 'True to train, False to test.')
+flags.DEFINE_bool('train', False, 'True to train, False to test.')
 flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest model)')
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')
@@ -192,6 +193,19 @@ def generate_test():
 
     return init_inputs, outputs, amp, phase
 
+def mutual_info(mean_prob, mc_prob):
+    """
+    computes the mutual information
+    :param mean_prob: average MC probabilities of shape [batch_size, img_h, img_w, num_cls]
+    :param mc_prob: List MC probabilities of length mc_simulations;
+                    each of shape  of shape [batch_size, img_h, img_w, num_cls]
+    :return: mutual information of shape [batch_size, img_h, img_w, num_cls]
+    """
+    eps = 1e-5
+    first_term = -1 * np.sum(mean_prob * np.log(mean_prob + eps), axis=-1)
+    second_term = np.sum(np.mean([prob * np.log(prob + eps) for prob in mc_prob], axis=0), axis=-1)
+    return first_term + second_term
+
 def test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999):
 
     inputs_all, outputs_all, amp_test, phase_test = generate_test()
@@ -203,6 +217,8 @@ def test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train
         inputs_a[line] = inputs_all[line, index[line], :]
         outputs_a[line] = outputs_all[line, index[line], :]
     feed_dict_line = {model.inputa: inputs_a, model.inputb: inputs_all,  model.labela: outputs_a, model.labelb: outputs_all, model.meta_lr: 0.0}
+    feed_dict_line_initial = {model.inputa: inputs_all, model.inputb: inputs_all,  model.labela: outputs_all, model.labelb: outputs_all, model.meta_lr: 0.0}
+    initial = sess.run(model.outputas, feed_dict_line_initial)
 
     mc_prediction = []
     for mc_iter in range(mc_simulation):
@@ -211,22 +227,33 @@ def test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train
     print("total mc simulation: ", mc_simulation)
     print("shape of predictions_all is: ", predictions_all[0].shape)
 
-    prob_mean = np.nanmean(mc_prediction, axis=0)
-    prob_variance = np.var(mc_prediction, axis=0)
+    prob_mean = np.nanmean(mc_prediction, axis=0)      # shape: [10, 2, 101, 1]
+    prob_variance = np.var(mc_prediction, axis=0)      # shape: [20, 10, 2, 101, 1]
+    # mutual_information = mutual_info(prob_mean, mc_prediction)
 
     for line in range(len(inputs_all)):
         plt.figure()
-        plt.plot(inputs_all[line, ..., 0].squeeze(), outputs_all[line, ..., 0].squeeze(), "r-", label="ground_truth")
+        X = inputs_all[line, ..., 0].squeeze()
+        plt.plot(X, initial[line, ..., 0].squeeze(), "g:", label="initial_pred",  linewidth=1)
+        plt.plot(X, outputs_all[line, ..., 0].squeeze(), "r-", label="ground_truth")
         # for update_step in range(len(predictions_all)):
         for update_step in [0, len(predictions_all)-1]:
-            X = inputs_all[line, ..., 0].squeeze()
             mu = prob_mean[update_step][line, ...].squeeze()
             uncertainty = np.sqrt(prob_variance[update_step][line, ...].squeeze())
+            # uncertainty = mutual_information[update_step][line, ...].squeeze()
             plt.plot(X, mu, "--", label="update_step_{:d}".format(update_step))
             plt.fill_between(X, mu + uncertainty, mu - uncertainty, alpha=0.1)
         plt.legend()
+        axes = plt.gca()
+        ymin = - amp_test[line] - 3
+        ymax = amp_test[line] + 3
+        axes.set_ylim([ymin, ymax])
 
-        out_figure = FLAGS.logdir + '/' + exp_string + '/' + 'test_ubs' + str(
+        line_name = "amp{:.2f}_ph{:.2f}_pts{:d}".format(amp_test[line], phase_test[line], points_train)
+        save_folder = FLAGS.logdir + '/' + exp_string + '/' + line_name + "/"
+        if not os.path.exists(save_folder):
+            os.makedirs(save_folder)
+        out_figure = save_folder + 'test_ubs' + str(
             FLAGS.update_batch_size) + '_stepsize' + str(FLAGS.update_lr) + 'line_{0:d}_numtrain_{1:d}_seed_{2:d}.png'.format(line, points_train, random_seed)
         plt.plot(inputs_a[line, :, 0], outputs_a[line, :, 0], "b*", label="training points")
 
@@ -350,7 +377,7 @@ def test(model, saver, sess, exp_string, data_generator, test_num_updates=None):
         writer.writerow(stds)
         writer.writerow(ci95)
 
-def main():
+def main(random_seed=1999):
     if FLAGS.datasource == 'sinusoid':
         if FLAGS.train:
             test_num_updates = 5
@@ -492,8 +519,13 @@ def main():
     else:
         # test_line(model, sess, exp_string)
         # test_line_limit(model, sess, exp_string, num_train=2, random_seed=1999)
-        test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999)
+        # test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999)
         # test(model, saver, sess, exp_string, data_generator, test_num_updates)
+        repeat_exp = 12
+        np.random.seed(random_seed)
+        sample_seed = np.random.randint(0, 10000, size=repeat_exp)
+        for i in tqdm(range(repeat_exp)):
+            test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=2, random_seed=sample_seed[i])
 
 if __name__ == "__main__":
     main()
