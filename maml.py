@@ -64,78 +64,97 @@ class MAML:
             self.labela = input_tensors['labela']
             self.labelb = input_tensors['labelb']
 
-        with tf.variable_scope('model', reuse=None) as training_scope:
-            if 'weights' in dir(self):
-                training_scope.reuse_variables()
-                weights = self.weights
-            else:
-                # Define the weights
-                self.weights = weights = self.construct_weights()
+        with tf.variable_scope('mc_simulation', reuse=None):
+            num_simulation = 4
+            outputas_list, outputbs_list, lossesa_list, lossesb_list, accuraciesa_list, accuraciesb_list = [], [], [], [], [], []
 
-            # outputbs[i] and lossesb[i] is the output and loss after i+1 gradient updates
-            lossesa, outputas, lossesb, outputbs = [], [], [], []
-            accuraciesa, accuraciesb = [], []
-            num_updates = max(self.test_num_updates, FLAGS.num_updates)
-            outputbs = [[]]*num_updates
-            lossesb = [[]]*num_updates
-            accuraciesb = [[]]*num_updates
+            for i in range(num_simulation):
 
-            def task_metalearn(inp, reuse=True):
-                """ Perform gradient descent for one task in the meta-batch. """
-                inputa, inputb, labela, labelb = inp
-                task_outputbs, task_lossesb = [], []
+                with tf.variable_scope('model_' + str(i), reuse=None) as training_scope:
+                    if 'weights' in dir(self):
+                        training_scope.reuse_variables()
+                        weights = self.weights
+                    else:
+                        # Define the weights
+                        self.weights = weights = self.construct_weights()
 
-                if self.classification:
-                    task_accuraciesb = []
+                    # outputbs[i] and lossesb[i] is the output and loss after i+1 gradient updates
+                    lossesa, outputas, lossesb, outputbs = [], [], [], []
+                    accuraciesa, accuraciesb = [], []
+                    num_updates = max(self.test_num_updates, FLAGS.num_updates)
+                    outputbs = [[]]*num_updates
+                    lossesb = [[]]*num_updates
+                    accuraciesb = [[]]*num_updates
 
-                task_outputa = self.forward(inputa, weights, reuse=reuse, keep_prob=self.keep_prob)  # only reuse on the first iter
-                task_lossa = self.loss_func(task_outputa, labela)
+                    def task_metalearn(inp, reuse=True):
+                        """ Perform gradient descent for one task in the meta-batch. """
+                        inputa, inputb, labela, labelb = inp
+                        task_outputbs, task_lossesb = [], []
 
-                grads = tf.gradients(task_lossa, list(weights.values()))
-                if FLAGS.stop_grad:
-                    grads = [tf.stop_gradient(grad) for grad in grads]
-                gradients = dict(zip(weights.keys(), grads))
-                fast_weights = dict(zip(weights.keys(), [weights[key] - self.update_lr*gradients[key] for key in weights.keys()]))
-                output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
-                task_outputbs.append(output)
-                task_lossesb.append(self.loss_func(output, labelb))
+                        if self.classification:
+                            task_accuraciesb = []
 
-                for j in range(num_updates - 1):
-                    loss = self.loss_func(self.forward(inputa, fast_weights, reuse=True, keep_prob=self.keep_prob), labela)
-                    grads = tf.gradients(loss, list(fast_weights.values()))
-                    if FLAGS.stop_grad:
-                        grads = [tf.stop_gradient(grad) for grad in grads]
-                    gradients = dict(zip(fast_weights.keys(), grads))
-                    fast_weights = dict(zip(fast_weights.keys(), [fast_weights[key] - self.update_lr*gradients[key] for key in fast_weights.keys()]))
-                    output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
-                    task_outputbs.append(output)
-                    task_lossesb.append(self.loss_func(output, labelb))
+                        task_outputa = self.forward(inputa, weights, reuse=reuse, keep_prob=self.keep_prob)  # only reuse on the first iter
+                        task_lossa = self.loss_func(task_outputa, labela)
 
-                task_output = [task_outputa, task_outputbs, task_lossa, task_lossesb]
+                        grads = tf.gradients(task_lossa, list(weights.values()))
+                        if FLAGS.stop_grad:
+                            grads = [tf.stop_gradient(grad) for grad in grads]
+                        gradients = dict(zip(weights.keys(), grads))
+                        fast_weights = dict(zip(weights.keys(), [weights[key] - self.update_lr*gradients[key] for key in weights.keys()]))
+                        output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
+                        task_outputbs.append(output)
+                        task_lossesb.append(self.loss_func(output, labelb))
 
-                if self.classification:
-                    task_accuracya = tf.contrib.metrics.accuracy(tf.argmax(tf.nn.softmax(task_outputa), 1), tf.argmax(labela, 1))
-                    for j in range(num_updates):
-                        task_accuraciesb.append(tf.contrib.metrics.accuracy(tf.argmax(tf.nn.softmax(task_outputbs[j]), 1), tf.argmax(labelb, 1)))
-                    task_output.extend([task_accuracya, task_accuraciesb])
+                        for j in range(num_updates - 1):
+                            loss = self.loss_func(self.forward(inputa, fast_weights, reuse=True, keep_prob=self.keep_prob), labela)
+                            grads = tf.gradients(loss, list(fast_weights.values()))
+                            if FLAGS.stop_grad:
+                                grads = [tf.stop_gradient(grad) for grad in grads]
+                            gradients = dict(zip(fast_weights.keys(), grads))
+                            fast_weights = dict(zip(fast_weights.keys(), [fast_weights[key] - self.update_lr*gradients[key] for key in fast_weights.keys()]))
+                            output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
+                            task_outputbs.append(output)
+                            task_lossesb.append(self.loss_func(output, labelb))
 
-                return task_output
+                        task_output = [task_outputa, task_outputbs, task_lossa, task_lossesb]
 
-            # if FLAGS.norm is not 'None':
-            #     # to initialize the batch norm vars, might want to combine this, and not run idx 0 twice.
-            #     unused = task_metalearn((self.inputa[0], self.inputb[0], self.labela[0], self.labelb[0]), False)
+                        if self.classification:
+                            task_accuracya = tf.contrib.metrics.accuracy(tf.argmax(tf.nn.softmax(task_outputa), 1), tf.argmax(labela, 1))
+                            for j in range(num_updates):
+                                task_accuraciesb.append(tf.contrib.metrics.accuracy(tf.argmax(tf.nn.softmax(task_outputbs[j]), 1), tf.argmax(labelb, 1)))
+                            task_output.extend([task_accuracya, task_accuraciesb])
 
-            out_dtype = [tf.float32, [tf.float32]*num_updates, tf.float32, [tf.float32]*num_updates]
-            if self.classification:
-                out_dtype.extend([tf.float32, [tf.float32]*num_updates])
-            result = tf.map_fn(task_metalearn, elems=(self.inputa, self.inputb, self.labela, self.labelb), dtype=out_dtype, parallel_iterations=FLAGS.meta_batch_size)
-            if self.classification:
-                outputas, outputbs, lossesa, lossesb, accuraciesa, accuraciesb = result
-            else:
-                outputas, outputbs, lossesa, lossesb  = result
+                        return task_output
 
+                    # if FLAGS.norm is not 'None':
+                    #     # to initialize the batch norm vars, might want to combine this, and not run idx 0 twice.
+                    #     unused = task_metalearn((self.inputa[0], self.inputb[0], self.labela[0], self.labelb[0]), False)
+
+                    out_dtype = [tf.float32, [tf.float32]*num_updates, tf.float32, [tf.float32]*num_updates]
+                    if self.classification:
+                        out_dtype.extend([tf.float32, [tf.float32]*num_updates])
+                    result_i = tf.map_fn(task_metalearn, elems=(self.inputa, self.inputb, self.labela, self.labelb), dtype=out_dtype, parallel_iterations=FLAGS.meta_batch_size)
+                    if self.classification:
+                        outputas_i, outputbs_i, lossesa_i, lossesb_i, accuraciesa_i, accuraciesb_i = result_i
+                        outputas_list.append(outputas_i)
+                        outputbs_list.append(outputbs_i)
+                        lossesa_list.append(lossesa_i)
+                        lossesb_list.append(lossesb_i)
+                        accuraciesa_list.append(accuraciesa_i)
+                        accuraciesb_list.append(accuraciesb_i)
+                    else:
+                        outputas_i, outputbs_i, lossesa_i, lossesb_i  = result_i
+                        outputas_list.append(outputas_i)
+                        outputbs_list.append(outputbs_i)
+                        lossesa_list.append(lossesa_i)
+                        lossesb_list.append(lossesb_i)
+
+            outputas = tf.reduce_mean(outputas_list, axis=0)
+            outputbs = tf.reduce_mean(outputbs_list, axis=0)
+            lossesa = tf.reduce_mean(lossesa_list, axis=0)
+            lossesb = tf.reduce_mean(lossesb_list, axis=0)
             self.lossesb = lossesb
-            self.result = result
 
         ## Performance & Optimization
         if 'train' in prefix:
