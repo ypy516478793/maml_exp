@@ -210,7 +210,9 @@ def test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train
 
     inputs_all, outputs_all, amp_test, phase_test = generate_test()
     np.random.seed(random_seed)
-    index = np.random.choice(inputs_all.shape[1], [inputs_all.shape[0], points_train], replace=False)
+    # Train_index = np.arange(int(inputs_all.shape[1] *1/3), int(inputs_all.shape[1] *2/3))
+    Train_index = np.arange(inputs_all.shape[1])
+    index = np.random.choice(Train_index, [inputs_all.shape[0], points_train], replace=False)
     inputs_a = np.zeros([inputs_all.shape[0], points_train, inputs_all.shape[2]])
     outputs_a = np.zeros([outputs_all.shape[0], points_train, outputs_all.shape[2]])
     for line in range(len(index)):
@@ -572,7 +574,7 @@ def main(random_seed=1999):
         np.random.seed(random_seed)
         sample_seed = np.random.randint(0, 10000, size=repeat_exp)
         for i in tqdm(range(repeat_exp)):
-            test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=2, random_seed=sample_seed[i])
+            test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=sample_seed[i])
 
 if __name__ == "__main__":
     main()
