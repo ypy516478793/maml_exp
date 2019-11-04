@@ -38,7 +38,7 @@ from tensorflow.python.platform import flags
 from tqdm import tqdm
 
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 FLAGS = flags.FLAGS
 
@@ -55,8 +55,8 @@ flags.DEFINE_integer('metatrain_iterations', 15000, 'number of metatraining iter
 flags.DEFINE_integer('meta_batch_size', 25, 'number of tasks sampled per meta-update')
 flags.DEFINE_float('meta_lr', 0.001, 'the base learning rate of the generator')
 flags.DEFINE_integer('update_batch_size', 5, 'number of examples used for inner gradient update (K for K-shot learning).')
-flags.DEFINE_float('update_lr', 1e-3, 'step size alpha for inner gradient update.') # 0.1 for omniglot
-# flags.DEFINE_float('update_lr', 1e-2, 'step size alpha for inner gradient update.') # 0.1 for omniglot
+# flags.DEFINE_float('update_lr', 1e-3, 'step size alpha for inner gradient update.') # 0.1 for omniglot
+flags.DEFINE_float('update_lr', 1e-2, 'step size alpha for inner gradient update.') # 0.1 for omniglot
 flags.DEFINE_integer('num_updates', 1, 'number of inner gradient updates during training.')
 
 ## Model options
@@ -65,7 +65,7 @@ flags.DEFINE_integer('num_filters', 64, 'number of filters for conv nets -- 32 f
 flags.DEFINE_bool('conv', True, 'whether or not to use a convolutional network, only applicable in some cases')
 flags.DEFINE_bool('max_pool', False, 'Whether or not to use max pooling rather than strided convolutions')
 flags.DEFINE_bool('stop_grad', False, 'if True, do not use second derivatives in meta-optimization (for speed)')
-flags.DEFINE_float('keep_prob', 0.5, 'if not None, used as keep_prob for all layers')
+flags.DEFINE_float('keep_prob', 0.9, 'if not None, used as keep_prob for all layers')
 flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, use dropout')
 # flags.DEFINE_float('keep_prob', None, 'if not None, used as keep_prob for all layers')
 
@@ -218,7 +218,13 @@ def test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train
         outputs_a[line] = outputs_all[line, index[line], :]
     feed_dict_line = {model.inputa: inputs_a, model.inputb: inputs_all,  model.labela: outputs_a, model.labelb: outputs_all, model.meta_lr: 0.0}
     feed_dict_line_initial = {model.inputa: inputs_all, model.inputb: inputs_all,  model.labela: outputs_all, model.labelb: outputs_all, model.meta_lr: 0.0}
-    initial = sess.run(model.outputas, feed_dict_line_initial)
+    # initial = sess.run(model.outputas, feed_dict_line_initial)
+    init_mc_prediction = []
+    for mc_iter in range(mc_simulation):
+        init_predictions_all = sess.run(model.outputas, feed_dict_line_initial)
+        init_mc_prediction.append(np.array(init_predictions_all))
+    initial = np.mean(init_mc_prediction, axis=0)
+    initial_variance = np.var(init_mc_prediction, axis=0)
 
     mc_prediction = []
     for mc_iter in range(mc_simulation):
@@ -232,33 +238,72 @@ def test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train
     # mutual_information = mutual_info(prob_mean, mc_prediction)
 
     for line in range(len(inputs_all)):
-        plt.figure()
-        X = inputs_all[line, ..., 0].squeeze()
-        plt.plot(X, initial[line, ..., 0].squeeze(), "g:", label="initial_pred",  linewidth=1)
-        plt.plot(X, outputs_all[line, ..., 0].squeeze(), "r-", label="ground_truth")
-        # for update_step in range(len(predictions_all)):
-        for update_step in [0, len(predictions_all)-1]:
-            mu = prob_mean[update_step][line, ...].squeeze()
-            uncertainty = np.sqrt(prob_variance[update_step][line, ...].squeeze())
-            # uncertainty = mutual_information[update_step][line, ...].squeeze()
-            plt.plot(X, mu, "--", label="update_step_{:d}".format(update_step))
-            plt.fill_between(X, mu + uncertainty, mu - uncertainty, alpha=0.1)
-        plt.legend()
-        axes = plt.gca()
-        ymin = - amp_test[line] - 3
-        ymax = amp_test[line] + 3
-        axes.set_ylim([ymin, ymax])
 
-        line_name = "amp{:.2f}_ph{:.2f}_pts{:d}".format(amp_test[line], phase_test[line], points_train)
-        save_folder = FLAGS.logdir + '/' + exp_string + '/' + line_name + "/"
-        if not os.path.exists(save_folder):
-            os.makedirs(save_folder)
-        out_figure = save_folder + 'test_ubs' + str(
-            FLAGS.update_batch_size) + '_stepsize' + str(FLAGS.update_lr) + 'line_{0:d}_numtrain_{1:d}_seed_{2:d}.png'.format(line, points_train, random_seed)
-        plt.plot(inputs_a[line, :, 0], outputs_a[line, :, 0], "b*", label="training points")
+        for update_step in range(len(predictions_all)):
+            if update_step % 20 == 0:
 
-        plt.savefig(out_figure, bbox_inches="tight", dpi=300)
-        plt.close()
+                plt.figure()
+                X = inputs_all[line, ..., 0].squeeze()
+                initial_mu = initial[line, ...].squeeze()
+                initial_uncertainty = np.sqrt(initial_variance[line, ...].squeeze())
+                plt.plot(X, initial_mu, "g:", label="initial_pred", linewidth=1)
+                plt.plot(X, outputs_all[line, ..., 0].squeeze(), "r-", label="ground_truth")
+                plt.fill_between(X, initial_mu + initial_uncertainty, initial_mu - initial_uncertainty, alpha=0.1)
+                # for update_step in range(len(predictions_all)):
+
+                mu = prob_mean[update_step][line, ...].squeeze()
+                uncertainty = np.sqrt(prob_variance[update_step][line, ...].squeeze())
+                # uncertainty = mutual_information[update_step][line, ...].squeeze()
+                plt.plot(X, mu, "--", label="update_step_{:d}".format(update_step))
+                plt.fill_between(X, mu + uncertainty, mu - uncertainty, alpha=0.1)
+
+
+                plt.legend()
+                axes = plt.gca()
+                ymin = - amp_test[line] - 3
+                ymax = amp_test[line] + 3
+                axes.set_ylim([ymin, ymax])
+
+                line_name = "amp{:.2f}_ph{:.2f}_pts{:d}".format(amp_test[line], phase_test[line], points_train)
+                save_folder = FLAGS.logdir + '/' + exp_string + '/' + line_name + "/"
+                if not os.path.exists(save_folder):
+                    os.makedirs(save_folder)
+                out_figure = save_folder + 'test_ubs' + str(
+                    FLAGS.update_batch_size) + '_stepsize' + str(
+                    FLAGS.update_lr) + 'line_{0:d}_numtrain_{1:d}_seed_{2:d}_step_{3:d}.png'.format(line, points_train,
+                                                                                         random_seed, update_step)
+                plt.plot(inputs_a[line, :, 0], outputs_a[line, :, 0], "b*", label="training points")
+
+                plt.savefig(out_figure, bbox_inches="tight", dpi=300)
+                plt.close()
+
+        # plt.figure()
+        # X = inputs_all[line, ..., 0].squeeze()
+        # plt.plot(X, initial[line, ..., 0].squeeze(), "g:", label="initial_pred",  linewidth=1)
+        # plt.plot(X, outputs_all[line, ..., 0].squeeze(), "r-", label="ground_truth")
+        # # for update_step in range(len(predictions_all)):
+        # for update_step in [0, len(predictions_all)-1]:
+        #     mu = prob_mean[update_step][line, ...].squeeze()
+        #     uncertainty = np.sqrt(prob_variance[update_step][line, ...].squeeze())
+        #     # uncertainty = mutual_information[update_step][line, ...].squeeze()
+        #     plt.plot(X, mu, "--", label="update_step_{:d}".format(update_step))
+        #     plt.fill_between(X, mu + uncertainty, mu - uncertainty, alpha=0.1)
+        # plt.legend()
+        # axes = plt.gca()
+        # ymin = - amp_test[line] - 3
+        # ymax = amp_test[line] + 3
+        # axes.set_ylim([ymin, ymax])
+        #
+        # line_name = "amp{:.2f}_ph{:.2f}_pts{:d}".format(amp_test[line], phase_test[line], points_train)
+        # save_folder = FLAGS.logdir + '/' + exp_string + '/' + line_name + "/"
+        # if not os.path.exists(save_folder):
+        #     os.makedirs(save_folder)
+        # out_figure = save_folder + 'test_ubs' + str(
+        #     FLAGS.update_batch_size) + '_stepsize' + str(FLAGS.update_lr) + 'line_{0:d}_numtrain_{1:d}_seed_{2:d}.png'.format(line, points_train, random_seed)
+        # plt.plot(inputs_a[line, :, 0], outputs_a[line, :, 0], "b*", label="training points")
+        #
+        # plt.savefig(out_figure, bbox_inches="tight", dpi=300)
+        # plt.close()
 
 def test_line_limit(model, sess, exp_string, num_train=10, random_seed=1999):
 
@@ -382,7 +427,7 @@ def main(random_seed=1999):
         if FLAGS.train:
             test_num_updates = 5
         else:
-            test_num_updates = 10
+            test_num_updates = 1000
     else:
         if FLAGS.datasource == 'miniimagenet':
             if FLAGS.train == True:
@@ -503,6 +548,8 @@ def main(random_seed=1999):
     if FLAGS.resume or not FLAGS.train:
         if exp_string == 'cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000':
             model_file = 'logs/sine//cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000/model69999'
+        # elif exp_string == "cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000kp0.50":
+        #     model_file = 'logs/sine//cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000kp0.50/model69999'
         else:
             model_file = tf.train.latest_checkpoint(FLAGS.logdir + '/' + exp_string)
         # model_file = 'logs/sine//cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000/model69999'
@@ -521,7 +568,7 @@ def main(random_seed=1999):
         # test_line_limit(model, sess, exp_string, num_train=2, random_seed=1999)
         # test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999)
         # test(model, saver, sess, exp_string, data_generator, test_num_updates)
-        repeat_exp = 12
+        repeat_exp = 10
         np.random.seed(random_seed)
         sample_seed = np.random.randint(0, 10000, size=repeat_exp)
         for i in tqdm(range(repeat_exp)):
@@ -568,4 +615,23 @@ if __name__ == "__main__":
 # plt.figure()
 # for i in range(len(init_inputs)):
 #     plt.plot(init_inputs[i].squeeze(), outputs[i].squeeze())
+
+## Create a video out of images
+# import cv2
+# import numpy as np
+# import glob
+# from natsort import natsorted
+#
+# img_array = []
+# for filename in natsorted(glob.glob('/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/sine/cls_5.mbs_25.ubs_10.numstep1.updatelr0.01nonorm.mt70000kp0.90/amp5.00_ph2.30_pts2/*.png')):
+#     img = cv2.imread(filename)
+#     height, width, layers = img.shape
+#     size = (width, height)
+#     img_array.append(img)
+#
+# out = cv2.VideoWriter('/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/sine/cls_5.mbs_25.ubs_10.numstep1.updatelr0.01nonorm.mt70000kp0.90/amp5.00_ph2.30_pts2/amp5.00_ph2.30_pts2.avi', cv2.VideoWriter_fourcc(*'DIVX'), 4, size)
+#
+# for i in range(len(img_array)):
+#     out.write(img_array[i])
+# out.release()
 
