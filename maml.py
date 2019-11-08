@@ -90,7 +90,7 @@ class MAML:
                     task_accuraciesb = []
 
                 task_outputa = self.forward(inputa, weights, reuse=reuse, keep_prob=self.keep_prob)  # only reuse on the first iter
-                task_lossa = self.loss_func(task_outputa, labela)
+                task_lossa = self.loss_func(task_outputa, labela, weights, beta=FLAGS.beta)
 
                 grads = tf.gradients(task_lossa, list(weights.values()))
                 if FLAGS.stop_grad:
@@ -99,10 +99,10 @@ class MAML:
                 fast_weights = dict(zip(weights.keys(), [weights[key] - self.update_lr*gradients[key] for key in weights.keys()]))
                 output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
                 task_outputbs.append(output)
-                task_lossesb.append(self.loss_func(output, labelb))
+                task_lossesb.append(self.loss_func(output, labelb, fast_weights, beta=FLAGS.beta))
 
                 for j in range(num_updates - 1):
-                    loss = self.loss_func(self.forward(inputa, fast_weights, reuse=True, keep_prob=self.keep_prob), labela)
+                    loss = self.loss_func(self.forward(inputa, fast_weights, reuse=True, keep_prob=self.keep_prob), labela, fast_weights, beta=FLAGS.beta)
                     grads = tf.gradients(loss, list(fast_weights.values()))
                     if FLAGS.stop_grad:
                         grads = [tf.stop_gradient(grad) for grad in grads]
@@ -110,7 +110,7 @@ class MAML:
                     fast_weights = dict(zip(fast_weights.keys(), [fast_weights[key] - self.update_lr*gradients[key] for key in fast_weights.keys()]))
                     output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
                     task_outputbs.append(output)
-                    task_lossesb.append(self.loss_func(output, labelb))
+                    task_lossesb.append(self.loss_func(output, labelb, fast_weights, beta=FLAGS.beta))
 
                 task_output = [task_outputa, task_outputbs, task_lossa, task_lossesb]
 

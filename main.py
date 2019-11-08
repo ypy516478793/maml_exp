@@ -66,6 +66,7 @@ flags.DEFINE_bool('conv', True, 'whether or not to use a convolutional network, 
 flags.DEFINE_bool('max_pool', False, 'Whether or not to use max pooling rather than strided convolutions')
 flags.DEFINE_bool('stop_grad', False, 'if True, do not use second derivatives in meta-optimization (for speed)')
 flags.DEFINE_float('keep_prob', 0.9, 'if not None, used as keep_prob for all layers')
+flags.DEFINE_float('beta', 0.01, 'coefficient for l2_regularization on weights')
 flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, use dropout')
 # flags.DEFINE_float('keep_prob', None, 'if not None, used as keep_prob for all layers')
 
@@ -73,7 +74,7 @@ flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, u
 flags.DEFINE_bool('log', True, 'if false, do not log summaries, for debugging code.')
 flags.DEFINE_string('logdir', '/tmp/data', 'directory for summaries and checkpoints.')
 flags.DEFINE_bool('resume', False, 'resume training if there is a model available')
-flags.DEFINE_bool('train', False, 'True to train, False to test.')
+flags.DEFINE_bool('train', True, 'True to train, False to test.')
 flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest model)')
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')
@@ -540,6 +541,8 @@ def main(random_seed=1999):
         exp_string += "kp{:.2f}".format(FLAGS.keep_prob)
     if FLAGS.drop_connect is True:
         exp_string += ".dropconn"
+    if FLAGS.beta != 0:
+        exp_string += ".beta{:.3f}".format(FLAGS.beta)
 
     resume_itr = 0
     model_file = None
@@ -570,14 +573,16 @@ def main(random_seed=1999):
         # test_line_limit(model, sess, exp_string, num_train=2, random_seed=1999)
         # test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999)
         # test(model, saver, sess, exp_string, data_generator, test_num_updates)
-        repeat_exp = 10
+        repeat_exp = 2
         np.random.seed(random_seed)
         sample_seed = np.random.randint(0, 10000, size=repeat_exp)
         for i in tqdm(range(repeat_exp)):
             test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=sample_seed[i])
 
 if __name__ == "__main__":
-    main()
+    for beta in [0.01, 0.1, 0.001]:
+        FLAGS.beta = beta
+        main()
 
 
 # import matplotlib.pyplot as plt

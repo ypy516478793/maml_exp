@@ -50,10 +50,14 @@ def normalize(inp, activation, reuse, scope):
             return inp
 
 ## Loss functions
-def mse(pred, label):
+def mse(pred, label, weights, beta=0.0):
     pred = tf.reshape(pred, [-1])
     label = tf.reshape(label, [-1])
-    return tf.reduce_mean(tf.square(pred-label))
+    regularizers = []
+    for w in weights:
+        regularizers.append(tf.nn.l2_loss(weights[w]))
+    l2_loss = tf.reduce_sum(regularizers)
+    return tf.reduce_mean(tf.square(pred-label)) + beta * l2_loss
 
 def xent(pred, label):
     # Note - with tf version <=0.12, this loss has incorrect 2nd derivatives
