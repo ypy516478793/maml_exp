@@ -98,6 +98,7 @@ class MAML:
                 gradients = dict(zip(weights.keys(), grads))
                 fast_weights = dict(zip(weights.keys(), [weights[key] - self.update_lr*gradients[key] for key in weights.keys()]))
                 output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
+                # output = self.forward(inputb, fast_weights, reuse=True, keep_prob=1)
                 task_outputbs.append(output)
                 task_lossesb.append(self.loss_func(output, labelb, fast_weights, beta=FLAGS.beta))
 
@@ -109,6 +110,7 @@ class MAML:
                     gradients = dict(zip(fast_weights.keys(), grads))
                     fast_weights = dict(zip(fast_weights.keys(), [fast_weights[key] - self.update_lr*gradients[key] for key in fast_weights.keys()]))
                     output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
+                    # output = self.forward(inputb, fast_weights, reuse=True, keep_prob=1)
                     task_outputbs.append(output)
                     task_lossesb.append(self.loss_func(output, labelb, fast_weights, beta=FLAGS.beta))
 
@@ -122,9 +124,9 @@ class MAML:
 
                 return task_output
 
-            # if FLAGS.norm is not 'None':
-            #     # to initialize the batch norm vars, might want to combine this, and not run idx 0 twice.
-            #     unused = task_metalearn((self.inputa[0], self.inputb[0], self.labela[0], self.labelb[0]), False)
+            if FLAGS.norm is not 'None':
+                # to initialize the batch norm vars, might want to combine this, and not run idx 0 twice.
+                unused = task_metalearn((self.inputa[0], self.inputb[0], self.labela[0], self.labelb[0]), False)
 
             out_dtype = [tf.float32, [tf.float32]*num_updates, tf.float32, [tf.float32]*num_updates]
             if self.classification:
@@ -247,15 +249,23 @@ class MAML:
             weights['b5'] = tf.Variable(tf.zeros([self.dim_output]), name='b5')
         return weights
 
-    def forward_conv(self, inp, weights, reuse=False, scope=''):
+    def forward_conv(self, inp, weights, reuse=False, scope='', keep_prob=None):
         # reuse is for the normalization parameters.
         channels = self.channels
         inp = tf.reshape(inp, [-1, self.img_size, self.img_size, channels])
 
         hidden1 = conv_block(inp, weights['conv1'], weights['b1'], reuse, scope+'0')
+        if keep_prob is not None:
+            hidden1 = tf.nn.dropout(hidden1, keep_prob=keep_prob)
         hidden2 = conv_block(hidden1, weights['conv2'], weights['b2'], reuse, scope+'1')
+        if keep_prob is not None:
+            hidden2 = tf.nn.dropout(hidden2, keep_prob=keep_prob)
         hidden3 = conv_block(hidden2, weights['conv3'], weights['b3'], reuse, scope+'2')
+        if keep_prob is not None:
+            hidden3 = tf.nn.dropout(hidden3, keep_prob=keep_prob)
         hidden4 = conv_block(hidden3, weights['conv4'], weights['b4'], reuse, scope+'3')
+        if keep_prob is not None:
+            hidden4 = tf.nn.dropout(hidden4, keep_prob=keep_prob)
         if FLAGS.datasource == 'miniimagenet':
             # last hidden layer is 6x6x64-ish, reshape to a vector
             hidden4 = tf.reshape(hidden4, [-1, np.prod([int(dim) for dim in hidden4.get_shape()[1:]])])

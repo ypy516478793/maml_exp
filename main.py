@@ -38,7 +38,7 @@ from tensorflow.python.platform import flags
 from tqdm import tqdm
 
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 FLAGS = flags.FLAGS
 
@@ -66,7 +66,7 @@ flags.DEFINE_bool('conv', True, 'whether or not to use a convolutional network, 
 flags.DEFINE_bool('max_pool', False, 'Whether or not to use max pooling rather than strided convolutions')
 flags.DEFINE_bool('stop_grad', False, 'if True, do not use second derivatives in meta-optimization (for speed)')
 flags.DEFINE_float('keep_prob', 0.9, 'if not None, used as keep_prob for all layers')
-flags.DEFINE_float('beta', 0.01, 'coefficient for l2_regularization on weights')
+flags.DEFINE_float('beta', 0.001, 'coefficient for l2_regularization on weights')
 flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, use dropout')
 # flags.DEFINE_float('keep_prob', None, 'if not None, used as keep_prob for all layers')
 
@@ -74,7 +74,7 @@ flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, u
 flags.DEFINE_bool('log', True, 'if false, do not log summaries, for debugging code.')
 flags.DEFINE_string('logdir', '/tmp/data', 'directory for summaries and checkpoints.')
 flags.DEFINE_bool('resume', False, 'resume training if there is a model available')
-flags.DEFINE_bool('train', False, 'True to train, False to test.')
+flags.DEFINE_bool('train', True, 'True to train, False to test.')
 flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest model)')
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')

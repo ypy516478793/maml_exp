@@ -59,6 +59,11 @@ def mse(pred, label, weights, beta=0.0):
     l2_loss = tf.reduce_sum(regularizers)
     return tf.reduce_mean(tf.square(pred-label)) + beta * l2_loss
 
-def xent(pred, label):
+def xent(pred, label, weights, beta=0.0):
     # Note - with tf version <=0.12, this loss has incorrect 2nd derivatives
-    return tf.nn.softmax_cross_entropy_with_logits(logits=pred, labels=label) / FLAGS.update_batch_size
+    CE_loss = tf.nn.softmax_cross_entropy_with_logits(logits=pred, labels=label) / FLAGS.update_batch_size
+    regularizers = []
+    for w in weights:
+        regularizers.append(tf.nn.l2_loss(weights[w]))
+    l2_loss = tf.reduce_sum(regularizers)
+    return CE_loss + beta * l2_loss
