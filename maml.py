@@ -124,7 +124,7 @@ class MAML:
 
                 return task_output
 
-            if FLAGS.norm is not 'None':
+            if FLAGS.norm != 'None':
                 # to initialize the batch norm vars, might want to combine this, and not run idx 0 twice.
                 unused = task_metalearn((self.inputa[0], self.inputb[0], self.labela[0], self.labelb[0]), False)
 

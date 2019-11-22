@@ -172,3 +172,57 @@ class DataGenerator(object):
                 init_inputs[:,input_idx:,0] = np.linspace(self.input_range[0], self.input_range[1], num=self.num_samples_per_class-input_idx, retstep=False)
             outputs[func] = amp[func] * np.sin(init_inputs[func]-phase[func])
         return init_inputs, outputs, amp, phase
+
+    def generate_test(self):
+        amp = np.random.uniform(self.amp_range[0], self.amp_range[1], [self.batch_size])
+        phase = np.random.uniform(self.phase_range[0], self.phase_range[1], [self.batch_size])
+        outputs = np.zeros([self.batch_size, self.num_samples_per_class, 1])
+        init_inputs = np.zeros([self.batch_size, self.num_samples_per_class, 1])
+        for func in range(self.batch_size):
+            init_inputs[func, :, 0] = np.linspace(-5, 5, self.num_samples_per_class)
+            outputs[func] = amp[func] * np.sin(init_inputs[func] - phase[func])
+
+        # if FLAGS.baseline == 'oracle':  # NOTE - this flag is specific to sinusoid
+        #     init_inputs = np.concatenate([init_inputs, np.zeros([init_inputs.shape[0], init_inputs.shape[1], 2])], 2)
+        #     for i in range(self.batch_size):
+        #         init_inputs[i, :, 1] = amp[i]
+        #         init_inputs[i, :, 2] = phase[i]
+
+        return init_inputs, outputs, amp, phase
+
+if __name__ == '__main__':
+    flags.DEFINE_string('datasource', 'sinusoid', 'sinusoid or omniglot or miniimagenet')
+    gen = DataGenerator(101, 1000)
+    inputs, outputs, amp, phase = gen.generate_test()
+
+    print()
+
+    ## ----------------------------- tol_0.1/0.01 ----------------------------- ##
+    import matplotlib.pyplot as plt
+
+    plt.figure()
+    for i in range(len(inputs)):
+        plt.plot(inputs[i].squeeze(), outputs[i].squeeze())
+    plt.axis([-5.5, 5.5, -5.5, 5.5])
+    plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/1000sines.png", bbox_inches="tight", dpi=300)
+
+    b_idx = np.random.choice(np.arange(inputs.shape[0])) # 962
+    x_idx = np.random.choice(np.arange(inputs.shape[1])) # 10
+    y_idx = outputs[b_idx, x_idx, 0]
+
+    plt.figure()
+    for i in np.where(np.abs(outputs[:, x_idx, 0] - y_idx) < 1e-1)[0]:
+        plt.plot(inputs[i].squeeze(), outputs[i].squeeze())
+    plt.plot(inputs[b_idx, x_idx, 0], outputs[b_idx, x_idx, 0], "rx")
+    plt.axis([-5.5, 5.5, -5.5, 5.5])
+    plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/tol_0.1_b{}_x{}.png".format(b_idx, x_idx), bbox_inches="tight", dpi=300)
+    plt.close()
+
+    plt.figure()
+    for i in np.where(np.abs(outputs[:, x_idx, 0] - y_idx) < 1e-2)[0]:
+        plt.plot(inputs[i].squeeze(), outputs[i].squeeze())
+    plt.plot(inputs[b_idx, x_idx, 0], outputs[b_idx, x_idx, 0], "rx")
+    plt.axis([-5.5, 5.5, -5.5, 5.5])
+    plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/tol_0.01_b{}_x{}.png".format(b_idx, x_idx), bbox_inches="tight", dpi=300)
+    plt.close()
+
