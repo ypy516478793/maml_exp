@@ -59,6 +59,7 @@ flags.DEFINE_integer('update_batch_size', 5, 'number of examples used for inner 
 # flags.DEFINE_float('update_lr', 1e-3, 'step size alpha for inner gradient update.') # 0.1 for omniglot
 flags.DEFINE_float('update_lr', 1e-2, 'step size alpha for inner gradient update.') # 0.1 for omniglot
 flags.DEFINE_integer('num_updates', 1, 'number of inner gradient updates during training.')
+flags.DEFINE_bool('allb', True, "if True, inputbs are all data")
 
 ## Model options
 flags.DEFINE_string('norm', 'batch_norm', 'batch_norm, layer_norm, or None')
@@ -75,7 +76,7 @@ flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, u
 flags.DEFINE_bool('log', True, 'if false, do not log summaries, for debugging code.')
 flags.DEFINE_string('logdir', '/tmp/data', 'directory for summaries and checkpoints.')
 flags.DEFINE_bool('resume', False, 'resume training if there is a model available')
-flags.DEFINE_bool('train', False, 'True to train, False to test.')
+flags.DEFINE_bool('train', True, 'True to train, False to test.')
 flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest model)')
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')
@@ -110,10 +111,19 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
                     batch_x[i, :, 1] = amp[i]
                     batch_x[i, :, 2] = phase[i]
 
-            inputa = batch_x[:, :num_classes*FLAGS.update_batch_size, :]
-            labela = batch_y[:, :num_classes*FLAGS.update_batch_size, :]
-            inputb = batch_x[:, num_classes*FLAGS.update_batch_size:, :] # b used for testing
-            labelb = batch_y[:, num_classes*FLAGS.update_batch_size:, :]
+            if FLAGS.allb:
+                a_idx = np.zeros([batch_x.shape[0], num_classes*FLAGS.update_batch_size, batch_x.shape[2]]).astype(np.int)
+                for i in range(batch_x.shape[0]):
+                    a_idx[i] = np.random.choice(batch_x.shape[1], [num_classes*FLAGS.update_batch_size, batch_x.shape[2]], replace=False)
+                inputa = np.take(batch_x, a_idx)
+                labela = np.take(batch_y, a_idx)
+                inputb = batch_x
+                labelb = batch_y
+            else:
+                inputa = batch_x[:, :num_classes*FLAGS.update_batch_size, :]
+                labela = batch_y[:, :num_classes*FLAGS.update_batch_size, :]
+                inputb = batch_x[:, num_classes*FLAGS.update_batch_size:, :] # b used for testing
+                labelb = batch_y[:, num_classes*FLAGS.update_batch_size:, :]
             feed_dict = {model.inputa: inputa, model.inputb: inputb,  model.labela: labela, model.labelb: labelb}
 
         if itr < FLAGS.pretrain_iterations:
@@ -669,6 +679,8 @@ def main(random_seed=1999):
         exp_string += ".dropconn"
     if FLAGS.beta != 0:
         exp_string += ".beta{:.3f}".format(FLAGS.beta)
+    if FLAGS.allb:
+        exp_string += "_allb"
 
     resume_itr = 0
     model_file = None
