@@ -48,6 +48,7 @@ flags.DEFINE_integer('num_classes', 5, 'number of classes used in classification
 # oracle means task id is input (only suitable for sinusoid)
 # flags.DEFINE_string('baseline', "oracle", 'oracle, or None')
 flags.DEFINE_string('baseline', None, 'oracle, or None')
+flags.DEFINE_bool('active', False, 'if True, use active method to pick training sample, otherwise, random pick.')
 
 ## Training options
 flags.DEFINE_integer('pretrain_iterations', 0, 'number of pre-training iterations.')
@@ -74,7 +75,7 @@ flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, u
 flags.DEFINE_bool('log', True, 'if false, do not log summaries, for debugging code.')
 flags.DEFINE_string('logdir', '/tmp/data', 'directory for summaries and checkpoints.')
 flags.DEFINE_bool('resume', False, 'resume training if there is a model available')
-flags.DEFINE_bool('train', True, 'True to train, False to test.')
+flags.DEFINE_bool('train', False, 'True to train, False to test.')
 flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest model)')
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')
@@ -206,6 +207,130 @@ def mutual_info(mean_prob, mc_prob):
     first_term = -1 * np.sum(mean_prob * np.log(mean_prob + eps), axis=-1)
     second_term = np.sum(np.mean([prob * np.log(prob + eps) for prob in mc_prob], axis=0), axis=-1)
     return first_term + second_term
+
+
+def query(model, sess, inputs_all, outputs_all, mc_simulation, inputs_a=None, outputs_a=None):
+    mc_prediction = []
+    if inputs_a is None:
+        feed_dict_line_initial = {model.inputa: inputs_all, model.inputb: inputs_all, model.labela: outputs_all,
+                                  model.labelb: outputs_all, model.meta_lr: 0.0}
+        for mc_iter in range(mc_simulation):
+            init_predictions_all = sess.run(model.outputas, feed_dict_line_initial)
+            mc_prediction.append(np.array(init_predictions_all))
+        prob_mean = np.mean(mc_prediction, axis=0)
+        prob_variance = np.var(mc_prediction, axis=0)
+        query_idx = np.argmax(prob_variance, axis=1)
+        return query_idx, prob_mean.squeeze(), prob_variance.squeeze()
+    else:
+        feed_dict_line = {model.inputa: inputs_a, model.inputb: inputs_all, model.labela: outputs_a,
+                          model.labelb: outputs_all, model.meta_lr: 0.0}
+        for mc_iter in range(mc_simulation):
+            predictions_all = sess.run(model.outputbs, feed_dict_line)
+            mc_prediction.append(np.array(predictions_all))
+        prob_mean = np.nanmean(mc_prediction, axis=0)  # predictions_all shape: [20, 10, 2, 101, 1]
+        prob_variance = np.var(mc_prediction, axis=0)  # prob_mean shape: [10, 2, 101, 1]
+        query_idx = np.argmax(prob_variance[-1], axis=1)
+        return query_idx, prob_mean[-1].squeeze(), prob_variance[-1].squeeze()
+
+def plot_pred(meta_info, mean, var, X_test, y_test, X_training=None, y_training=None, x_new=None, y_new=None):
+    plt.figure()
+    plt.plot(X_test, y_test, "--r", label="gt")
+    plt.plot(X_test, mean, "-", label="pred")
+    std = np.sqrt(var)
+    plt.fill_between(X_test.reshape(-1), mean + std, mean - std, alpha=0.1)
+    if X_training is not None:
+        plt.plot(X_training, y_training, 'gx', label="training")
+    if x_new is not None:
+        plt.plot(x_new, y_new, 'x', label="new_query")
+    plt.legend()
+    avg_bias = np.mean(np.abs(mean - y_test.reshape(-1)))
+    plt.title("avg_bias: {:.2f}".format(avg_bias))
+
+    amp, phase, exp_string, step = meta_info
+    axes = plt.gca()
+    ymin = - amp - 3
+    ymax = amp + 3
+    axes.set_ylim([ymin, ymax])
+
+    line_name = "amp{:.2f}_ph{:.2f}".format(amp, phase)
+    save_folder = FLAGS.logdir + '/' + exp_string + "/" + line_name + "/"
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
+    out_figure = save_folder + 'test_ubs' + str(
+        FLAGS.update_batch_size) + '_stepsize' + str(
+        FLAGS.update_lr) + 'step_{:d}.png'.format(step)
+
+    plt.savefig(out_figure, bbox_inches="tight", dpi=300)
+    plt.close()
+
+def add_train(index, query_idx):
+    if index is None:
+        index = query_idx
+    else:
+        index = np.hstack([index, query_idx])
+    return index
+
+def random_query(batch, Train_index, index=None):
+    query_idx = np.zeros([batch, 1], dtype=np.int)
+    for i in range(len(query_idx)):
+        sample_idx = np.random.choice(Train_index)
+        if index is not None:
+            while sample_idx in index[i]:
+                sample_idx = np.random.choice(Train_index)
+        query_idx[i, 0] = sample_idx
+    return query_idx
+
+def test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_points_train=10, random=False):
+
+    inputs_all, outputs_all, amp_test, phase_test = generate_test()
+    # np.random.seed(random_seed)
+    # Train_index = np.arange(int(inputs_all.shape[1] *1/3), int(inputs_all.shape[1] *2/3))
+    Train_index = np.arange(inputs_all.shape[1])
+
+    exp_string = exp_string + "/active"
+    if random: exp_string = exp_string + "_baseline"
+
+    index = None
+    if index is None:
+        total_step = total_points_train
+    else:
+        total_step = total_points_train - index.shape[-1]
+
+    query_time = 0
+    if index is None:
+        query_idx, pred, var = query(model, sess, inputs_all, outputs_all, mc_simulation)
+        if random:
+            query_idx = random_query(inputs_all.shape[0], Train_index)
+        for line in range(len(inputs_all)):
+            meta_info = amp_test[line], phase_test[line], exp_string, query_time
+            plot_pred(meta_info, pred[line], var[line], inputs_all[line], outputs_all[line])
+    else:
+        inputs_a = np.zeros([inputs_all.shape[0], index.shape[-1], inputs_all.shape[2]])
+        outputs_a = np.zeros([outputs_all.shape[0], index.shape[-1], outputs_all.shape[2]])
+        for line in range(len(inputs_all)):
+            inputs_a[line] = inputs_all[line, index[line], :]
+            outputs_a[line] = outputs_all[line, index[line], :]
+        query_idx, pred, var = query(model, sess, inputs_all, outputs_all, mc_simulation, inputs_a, outputs_a)
+        if random:
+            query_idx = random_query(inputs_all.shape[0], Train_index)
+        for line in range(len(inputs_all)):
+            meta_info = amp_test[line], phase_test[line], exp_string, query_time
+            plot_pred(meta_info, pred[line], var[line], inputs_all[line], outputs_all[line], inputs_a[line], outputs_a[line], x_new=None, y_new=None)
+    index = add_train(index, query_idx)
+
+    for query_time in range(1, total_step+1):
+        inputs_a = np.zeros([inputs_all.shape[0], index.shape[-1], inputs_all.shape[2]])
+        outputs_a = np.zeros([outputs_all.shape[0], index.shape[-1], outputs_all.shape[2]])
+        for line in range(len(index)):
+            inputs_a[line] = inputs_all[line, index[line], :]
+            outputs_a[line] = outputs_all[line, index[line], :]
+        query_idx, pred, var = query(model, sess, inputs_all, outputs_all, mc_simulation, inputs_a, outputs_a)
+        if random:
+            query_idx = random_query(inputs_all.shape[0], Train_index)
+        for line in range(len(index)):
+            meta_info = amp_test[line], phase_test[line], exp_string, query_time
+            plot_pred(meta_info, pred[line], var[line], inputs_all[line], outputs_all[line], inputs_a[line, :-1], outputs_a[line, :-1], inputs_a[line, -1], outputs_a[line, -1])
+        index = add_train(index, query_idx)
 
 def test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999):
 
@@ -431,6 +556,7 @@ def main(random_seed=1999):
             test_num_updates = 5
         else:
             test_num_updates = 1000
+            # test_num_updates = 10
     else:
         if FLAGS.datasource == 'miniimagenet':
             if FLAGS.train == True:
@@ -571,13 +697,16 @@ def main(random_seed=1999):
     else:
         # test_line(model, sess, exp_string)
         # test_line_limit(model, sess, exp_string, num_train=2, random_seed=1999)
+        random_pick = not FLAGS.active
+        test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_points_train=10, random=random_pick)
         # test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999)
         # test(model, saver, sess, exp_string, data_generator, test_num_updates)
-        repeat_exp = 5
-        np.random.seed(random_seed)
-        sample_seed = np.random.randint(0, 10000, size=repeat_exp)
-        for i in tqdm(range(repeat_exp)):
-            test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=2, random_seed=sample_seed[i])
+
+        # repeat_exp = 5
+        # np.random.seed(random_seed)
+        # sample_seed = np.random.randint(0, 10000, size=repeat_exp)
+        # for i in tqdm(range(repeat_exp)):
+        #     test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=2, random_seed=sample_seed[i])
 
 if __name__ == "__main__":
     main()
