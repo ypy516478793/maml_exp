@@ -25,8 +25,10 @@ class DataGenerator(object):
         self.num_classes = 1  # by default 1 (only relevant for classification problems)
 
         if FLAGS.datasource == 'sinusoid':
-            # self.generate = self.generate_sinusoid_batch
-            self.generate = self.generate_sinusoid_all
+            if FLAGS.allb is True:
+                self.generate = self.generate_sinusoid_all
+            else:
+                self.generate = self.generate_sinusoid_batch
             self.amp_range = config.get('amp_range', [0.1, 5.0])
             self.phase_range = config.get('phase_range', [0, np.pi])
             self.input_range = config.get('input_range', [-5.0, 5.0])

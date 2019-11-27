@@ -48,7 +48,7 @@ flags.DEFINE_integer('num_classes', 5, 'number of classes used in classification
 # oracle means task id is input (only suitable for sinusoid)
 # flags.DEFINE_string('baseline', "oracle", 'oracle, or None')
 flags.DEFINE_string('baseline', None, 'oracle, or None')
-flags.DEFINE_bool('active', False, 'if True, use active method to pick training sample, otherwise, random pick.')
+flags.DEFINE_bool('active', True, 'if True, use active method to pick training sample, otherwise, random pick.')
 
 ## Training options
 flags.DEFINE_integer('pretrain_iterations', 0, 'number of pre-training iterations.')
@@ -76,7 +76,7 @@ flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, u
 flags.DEFINE_bool('log', True, 'if false, do not log summaries, for debugging code.')
 flags.DEFINE_string('logdir', '/tmp/data', 'directory for summaries and checkpoints.')
 flags.DEFINE_bool('resume', False, 'resume training if there is a model available')
-flags.DEFINE_bool('train', True, 'True to train, False to test.')
+flags.DEFINE_bool('train', False, 'True to train, False to test.')
 flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest model)')
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')
@@ -113,12 +113,25 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
 
             if FLAGS.allb:
                 a_idx = np.zeros([batch_x.shape[0], num_classes*FLAGS.update_batch_size, batch_x.shape[2]]).astype(np.int)
+                inputa = np.zeros([batch_x.shape[0], num_classes*FLAGS.update_batch_size, batch_x.shape[2]])
+                labela = np.zeros([batch_x.shape[0], num_classes*FLAGS.update_batch_size, batch_x.shape[2]])
                 for i in range(batch_x.shape[0]):
                     a_idx[i] = np.random.choice(batch_x.shape[1], [num_classes*FLAGS.update_batch_size, batch_x.shape[2]], replace=False)
-                inputa = np.take(batch_x, a_idx)
-                labela = np.take(batch_y, a_idx)
+                    inputa[i] = batch_x[i, a_idx[i, :, 0]]
+                    labela[i] = batch_y[i, a_idx[i, :, 0]]
                 inputb = batch_x
                 labelb = batch_y
+
+                # h, w, d = batch_x.shape[0], num_classes*FLAGS.update_batch_size, batch_x.shape[2]
+                # task_idx = np.repeat(np.arange(h), w*d).reshape(h,w,d)
+                # a_idx = np.zeros([h, w, d]).astype(np.int)
+                # for i in range(batch_x.shape[0]):
+                #     a_idx[i] = np.random.choice(batch_x.shape[1], [w, d], replace=False)
+                # feature_idx = np.tile(np.arange(d), h*w).reshape(h,w,d)
+                # inputa = batch_x[task_idx, a_idx, feature_idx]
+                # labela = batch_y[task_idx, a_idx, feature_idx]
+                # inputb = batch_x
+                # labelb = batch_y
             else:
                 inputa = batch_x[:, :num_classes*FLAGS.update_batch_size, :]
                 labela = batch_y[:, :num_classes*FLAGS.update_batch_size, :]
@@ -714,7 +727,7 @@ def main(random_seed=1999):
         # test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999)
         # test(model, saver, sess, exp_string, data_generator, test_num_updates)
 
-        # repeat_exp = 5
+        # repeat_exp = 2
         # np.random.seed(random_seed)
         # sample_seed = np.random.randint(0, 10000, size=repeat_exp)
         # for i in tqdm(range(repeat_exp)):

@@ -97,8 +97,8 @@ class MAML:
                     grads = [tf.stop_gradient(grad) for grad in grads]
                 gradients = dict(zip(weights.keys(), grads))
                 fast_weights = dict(zip(weights.keys(), [weights[key] - self.update_lr*gradients[key] for key in weights.keys()]))
-                output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
-                # output = self.forward(inputb, fast_weights, reuse=True, keep_prob=1)
+                # output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
+                output = self.forward(inputb, fast_weights, reuse=True, keep_prob=1)
                 task_outputbs.append(output)
                 task_lossesb.append(self.loss_func(output, labelb, fast_weights, beta=FLAGS.beta))
 
@@ -109,8 +109,8 @@ class MAML:
                         grads = [tf.stop_gradient(grad) for grad in grads]
                     gradients = dict(zip(fast_weights.keys(), grads))
                     fast_weights = dict(zip(fast_weights.keys(), [fast_weights[key] - self.update_lr*gradients[key] for key in fast_weights.keys()]))
-                    output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
-                    # output = self.forward(inputb, fast_weights, reuse=True, keep_prob=1)
+                    # output = self.forward(inputb, fast_weights, reuse=True, keep_prob=self.keep_prob)
+                    output = self.forward(inputb, fast_weights, reuse=True, keep_prob=1)
                     task_outputbs.append(output)
                     task_lossesb.append(self.loss_func(output, labelb, fast_weights, beta=FLAGS.beta))
 
