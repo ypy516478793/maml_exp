@@ -41,6 +41,7 @@ import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 FLAGS = flags.FLAGS
+extra_string = ""
 
 ## Dataset/method options
 flags.DEFINE_string('datasource', 'sinusoid', 'sinusoid or omniglot or miniimagenet')
@@ -48,7 +49,7 @@ flags.DEFINE_integer('num_classes', 5, 'number of classes used in classification
 # oracle means task id is input (only suitable for sinusoid)
 # flags.DEFINE_string('baseline', "oracle", 'oracle, or None')
 flags.DEFINE_string('baseline', None, 'oracle, or None')
-flags.DEFINE_bool('active', True, 'if True, use active method to pick training sample, otherwise, random pick.')
+flags.DEFINE_bool('active', False, 'if True, use active method to pick training sample, otherwise, random pick.')
 
 ## Training options
 flags.DEFINE_integer('pretrain_iterations', 0, 'number of pre-training iterations.')
@@ -60,6 +61,7 @@ flags.DEFINE_integer('update_batch_size', 5, 'number of examples used for inner 
 flags.DEFINE_float('update_lr', 1e-2, 'step size alpha for inner gradient update.') # 0.1 for omniglot
 flags.DEFINE_integer('num_updates', 1, 'number of inner gradient updates during training.')
 flags.DEFINE_bool('allb', True, "if True, inputbs are all data")
+flags.DEFINE_bool('randomLengthTrain', True, "if True, length for inputas are random")
 
 ## Model options
 flags.DEFINE_string('norm', 'batch_norm', 'batch_norm, layer_norm, or None')
@@ -111,12 +113,17 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
                     batch_x[i, :, 1] = amp[i]
                     batch_x[i, :, 2] = phase[i]
 
+            # if FLAGS.allb and FLAGS.datasource == 'sinusoid':
             if FLAGS.allb:
-                a_idx = np.zeros([batch_x.shape[0], num_classes*FLAGS.update_batch_size, batch_x.shape[2]]).astype(np.int)
-                inputa = np.zeros([batch_x.shape[0], num_classes*FLAGS.update_batch_size, batch_x.shape[2]])
-                labela = np.zeros([batch_x.shape[0], num_classes*FLAGS.update_batch_size, batch_x.shape[2]])
+                if FLAGS.randomLengthTrain:
+                    K_shots = np.random.choice(num_classes*FLAGS.update_batch_size) + 1
+                else:
+                    K_shots = num_classes*FLAGS.update_batch_size
+                a_idx = np.zeros([batch_x.shape[0], K_shots, batch_x.shape[2]]).astype(np.int)
+                inputa = np.zeros([batch_x.shape[0], K_shots, batch_x.shape[2]])
+                labela = np.zeros([batch_x.shape[0], K_shots, batch_x.shape[2]])
                 for i in range(batch_x.shape[0]):
-                    a_idx[i] = np.random.choice(batch_x.shape[1], [num_classes*FLAGS.update_batch_size, batch_x.shape[2]], replace=False)
+                    a_idx[i] = np.random.choice(batch_x.shape[1], [K_shots, batch_x.shape[2]], replace=False)
                     inputa[i] = batch_x[i, a_idx[i, :, 0]]
                     labela[i] = batch_y[i, a_idx[i, :, 0]]
                 inputb = batch_x
@@ -150,6 +157,26 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
                 input_tensors.extend([model.total_accuracy1, model.total_accuracies2[FLAGS.num_updates-1]])
 
         result = sess.run(input_tensors, feed_dict)
+
+        # inputa = sess.run(model.inputa)
+        # labela = sess.run(model.labela)
+        # inputb = sess.run(model.inputb)
+        # labelb = sess.run(model.labelb)
+        # for i in range(5):
+        #     plt.figure()
+        #     plt.imshow(inputa[0, i, :].reshape(28, 28))
+        #     print("image_a {:d}'s label is {}".format(i, labela[0, i, :]))
+        #     image_name = "image_a_{:d}_label_{:d}.png".format(i, np.argmax(labela[0, i, :]))
+        #     plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/omniglot/" + image_name , bbox_inches="tight", dpi=300)
+        #     plt.close()
+        # for i in range(5):
+        #     plt.figure()
+        #     plt.imshow(inputb[0, i, :].reshape(28, 28))
+        #     print("image_b {:d}'s label is {}".format(i, labelb[0, i, :]))
+        #     image_name = "image_b_{:d}_label_{:d}.png".format(i, np.argmax(labelb[0, i, :]))
+        #     plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/omniglot/" + image_name , bbox_inches="tight", dpi=300)
+        #     plt.close()
+
 
         if itr % SUMMARY_INTERVAL == 0:
             prelosses.append(result[-2])
@@ -199,11 +226,12 @@ NUM_TEST_POINTS = 600
 
 def generate_test():
     batch_size = 2
+    # batch_size = 10
     num_points = 101
-    # amp = np.array([3, 5])
-    # phase = np.array([0, 2.3])
     amp = np.array([5, 3])
     phase = np.array([2.3, 0])
+    # amp = np.array([5, 3, 2.3, 2, 2, 0.9, 1.7, 3.5, 4, 4.5])
+    # phase = np.array([2.3, 0, 1.2, 2.5, 3.1, 0.5, 0.1, 2.6, 4.6, 1.7])
     outputs = np.zeros([batch_size, num_points, 1])
     init_inputs = np.zeros([batch_size, num_points, 1])
     for func in range(batch_size):
@@ -694,6 +722,10 @@ def main(random_seed=1999):
         exp_string += ".beta{:.3f}".format(FLAGS.beta)
     if FLAGS.allb:
         exp_string += "_allb"
+    if FLAGS.randomLengthTrain:
+        exp_string += "_randomLengthTrain"
+
+    exp_string += extra_string
 
     resume_itr = 0
     model_file = None
