@@ -225,13 +225,13 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
 NUM_TEST_POINTS = 600
 
 def generate_test():
-    batch_size = 2
-    # batch_size = 10
+    # batch_size = 2
+    batch_size = 10
     num_points = 101
-    amp = np.array([5, 3])
-    phase = np.array([2.3, 0])
-    # amp = np.array([5, 3, 2.3, 2, 2, 0.9, 1.7, 3.5, 4, 4.5])
-    # phase = np.array([2.3, 0, 1.2, 2.5, 3.1, 0.5, 0.1, 2.6, 4.6, 1.7])
+    # amp = np.array([5, 3])
+    # phase = np.array([2.3, 0])
+    amp = np.array([5, 3, 2.3, 2, 2, 0.9, 1.7, 3.5, 4, 4.5])
+    phase = np.array([2.3, 0, 1.2, 2.5, 3.1, 0.5, 0.1, 2.6, 4.6, 1.7])
     outputs = np.zeros([batch_size, num_points, 1])
     init_inputs = np.zeros([batch_size, num_points, 1])
     for func in range(batch_size):
@@ -243,6 +243,22 @@ def generate_test():
         for i in range(batch_size):
             init_inputs[i, :, 1] = amp[i]
             init_inputs[i, :, 2] = phase[i]
+
+    return init_inputs, outputs, amp, phase
+
+def generate_statistic_test(random_seed=42):
+    np.random.seed(random_seed)
+    amp_range = [0.1, 5.0]
+    phase_range = [0, np.pi]
+    batch_size = 20
+    num_points = 101
+    amp = np.random.uniform(amp_range[0], amp_range[1], [batch_size])
+    phase = np.random.uniform(phase_range[0], phase_range[1], [batch_size])
+    outputs = np.zeros([batch_size, num_points, 1])
+    init_inputs = np.zeros([batch_size, num_points, 1])
+    for func in range(batch_size):
+        init_inputs[func, :, 0] = np.linspace(-5, 5, num_points)
+        outputs[func] = amp[func] * np.sin(init_inputs[func] - phase[func])
 
     return init_inputs, outputs, amp, phase
 
@@ -333,7 +349,11 @@ def random_query(batch, Train_index, index=None):
 
 def test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_points_train=10, random=False):
 
-    inputs_all, outputs_all, amp_test, phase_test = generate_test()
+    statistic_results = False
+    if statistic_results:
+        inputs_all, outputs_all, amp_test, phase_test = generate_statistic_test()
+    else:
+        inputs_all, outputs_all, amp_test, phase_test = generate_test()
     # np.random.seed(random_seed)
     # Train_index = np.arange(int(inputs_all.shape[1] *1/3), int(inputs_all.shape[1] *2/3))
     Train_index = np.arange(inputs_all.shape[1])
@@ -347,14 +367,19 @@ def test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_point
     else:
         total_step = total_points_train - index.shape[-1]
 
+    bias_array = np.zeros([len(inputs_all), total_step+1])
+
     query_time = 0
     if index is None:
         query_idx, pred, var = query(model, sess, inputs_all, outputs_all, mc_simulation)
         if random:
             query_idx = random_query(inputs_all.shape[0], Train_index)
         for line in range(len(inputs_all)):
-            meta_info = amp_test[line], phase_test[line], exp_string, query_time
-            plot_pred(meta_info, pred[line], var[line], inputs_all[line], outputs_all[line])
+            if statistic_results:
+                bias_array[line, query_time] = np.mean(np.abs( pred[line] - outputs_all[line].reshape(-1)))
+            else:
+                meta_info = amp_test[line], phase_test[line], exp_string, query_time
+                plot_pred(meta_info, pred[line], var[line], inputs_all[line], outputs_all[line])
     else:
         inputs_a = np.zeros([inputs_all.shape[0], index.shape[-1], inputs_all.shape[2]])
         outputs_a = np.zeros([outputs_all.shape[0], index.shape[-1], outputs_all.shape[2]])
@@ -365,11 +390,14 @@ def test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_point
         if random:
             query_idx = random_query(inputs_all.shape[0], Train_index)
         for line in range(len(inputs_all)):
-            meta_info = amp_test[line], phase_test[line], exp_string, query_time
-            plot_pred(meta_info, pred[line], var[line], inputs_all[line], outputs_all[line], inputs_a[line], outputs_a[line], x_new=None, y_new=None)
+            if statistic_results:
+                bias_array[line, query_time] = np.mean(np.abs( pred[line] - outputs_all[line].reshape(-1)))
+            else:
+                meta_info = amp_test[line], phase_test[line], exp_string, query_time
+                plot_pred(meta_info, pred[line], var[line], inputs_all[line], outputs_all[line], inputs_a[line], outputs_a[line], x_new=None, y_new=None)
     index = add_train(index, query_idx)
 
-    for query_time in range(1, total_step+1):
+    for query_time in tqdm(range(1, total_step+1)):
         inputs_a = np.zeros([inputs_all.shape[0], index.shape[-1], inputs_all.shape[2]])
         outputs_a = np.zeros([outputs_all.shape[0], index.shape[-1], outputs_all.shape[2]])
         for line in range(len(index)):
@@ -379,9 +407,16 @@ def test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_point
         if random:
             query_idx = random_query(inputs_all.shape[0], Train_index)
         for line in range(len(index)):
-            meta_info = amp_test[line], phase_test[line], exp_string, query_time
-            plot_pred(meta_info, pred[line], var[line], inputs_all[line], outputs_all[line], inputs_a[line, :-1], outputs_a[line, :-1], inputs_a[line, -1], outputs_a[line, -1])
+            if statistic_results:
+                bias_array[line, query_time] = np.mean(np.abs( pred[line] - outputs_all[line].reshape(-1)))
+            else:
+                meta_info = amp_test[line], phase_test[line], exp_string, query_time
+                plot_pred(meta_info, pred[line], var[line], inputs_all[line], outputs_all[line], inputs_a[line, :-1], outputs_a[line, :-1], inputs_a[line, -1], outputs_a[line, -1])
         index = add_train(index, query_idx)
+
+    if statistic_results:
+        with open(FLAGS.logdir + '/' + exp_string + "/bias_array.pkl", "wb") as f:
+            pickle.dump(bias_array, f)
 
 def test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999):
 
@@ -755,7 +790,7 @@ def main(random_seed=1999):
         # test_line(model, sess, exp_string)
         # test_line_limit(model, sess, exp_string, num_train=2, random_seed=1999)
         random_pick = not FLAGS.active
-        test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_points_train=10, random=random_pick)
+        test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_points_train=FLAGS.update_batch_size, random=random_pick)
         # test_line_limit_Baye(model, sess, exp_string, mc_simulation=20, points_train=10, random_seed=1999)
         # test(model, saver, sess, exp_string, data_generator, test_num_updates)
 
