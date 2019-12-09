@@ -3,6 +3,7 @@ import numpy as np
 import os
 import random
 import tensorflow as tf
+import matplotlib.pyplot as plt
 
 from tensorflow.python.platform import flags
 from utils import get_images
@@ -35,6 +36,8 @@ class DataGenerator(object):
             self.dim_input = 1
             self.dim_output = 1
         elif 'omniglot' in FLAGS.datasource:
+            self.generate = self.generate_omniglot_batch
+            self.total_examples_per_class = 20
             self.num_classes = config.get('num_classes', FLAGS.num_classes)
             self.img_size = config.get('img_size', (28, 28))
             self.dim_input = np.prod(self.img_size)
@@ -161,6 +164,39 @@ class DataGenerator(object):
         all_label_batches = tf.stack(all_label_batches)
         all_label_batches = tf.one_hot(all_label_batches, self.num_classes)
         return all_image_batches, all_label_batches
+
+    def generate_omniglot_batch(self, train=True):
+        if train:
+            folders = self.metatrain_character_folders
+        else:
+            folders = self.metaval_character_folders
+        images, labels = zip(*[self.generate_omniglot_one(folders) for _ in range(self.batch_size)])
+        return np.array(images), np.array(labels), None, None
+
+    def generate_omniglot_one(self, folders):
+        class_rotation = np.random.choice(range(4), self.num_classes)
+        sampled_character_folders = random.sample(folders, self.num_classes)
+        random.shuffle(sampled_character_folders)
+        labels_and_images = get_images(sampled_character_folders, range(self.num_classes), shuffle=False)
+        # make sure the above isn't randomized order
+        labels = [li[0] for li in labels_and_images]
+        filenames = [li[1] for li in labels_and_images]
+        images = [plt.imread(file) for file in filenames]
+        for i in range(len(images)):
+            im = images[i]
+            im = np.rot90(im, k=class_rotation[labels[i]])
+            images[i] = im.reshape(-1)
+        images = np.array(images)  # shape: (num_classes*total_examples_per_class, input_dim=28*28)
+        labels = np.eye(self.num_classes, dtype=np.int32)[labels]   # shape: (num_classes*total_examples_per_class, num_classes)
+        new_image_list, new_label_list = [], []
+        for k in range(self.total_examples_per_class):
+            class_idxs = np.arange(0, self.num_classes)
+            random.shuffle(class_idxs)
+            true_idxs = class_idxs * self.total_examples_per_class + k
+            new_image_list.append(images[true_idxs])
+            new_label_list.append(labels[true_idxs])
+
+        return (np.array(new_image_list).reshape(-1, self.dim_input), np.array(new_label_list).reshape(-1, self.num_classes))
 
     def generate_sinusoid_batch(self, train=True, input_idx=None):
         # Note train arg is not used (but it is used for omniglot method.
