@@ -21,15 +21,22 @@ def plot_line(bias, label):
     plt.fill_between(x.reshape(-1), mean + std, mean - std, alpha=0.1)
 
 
-folderName = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/sine/cls_5.mbs_25.ubs_10.numstep1.updatelr0.01nonorm.mt70000kp0.90.beta0.001_allb_randomLengthTrain/"
-active_bias = read_bias(os.path.join(folderName, "active/bias_array.pkl"))
-baseline_bias = read_bias(os.path.join(folderName, "active_baseline/bias_array.pkl"))
+# folderName = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/sine/cls_5.mbs_25.ubs_10.numstep1.updatelr0.01nonorm.mt70000kp0.90.beta0.001_allb_randomLengthTrain/"
+# folderName = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/sine/cls_5.mbs_25.ubs_10.numstep1.updatelr0.01nonorm.mt70000kp0.90.beta0.001_allb/"
+folderName = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/omniglot5way/cls_5.mbs_32.ubs_1.numstep1.updatelr0.4batchnorm.mt60000kp0.90_allb/"
+# active_bias = read_bias(os.path.join(folderName, "active/bias_array.pkl"))
+active_bias = read_bias(os.path.join(folderName, "active/acc_array.pkl"))
+# baseline_bias = read_bias(os.path.join(folderName, "active_baseline/bias_array.pkl"))
+baseline_bias = read_bias(os.path.join(folderName, "active_baseline/acc_array.pkl"))
 
 plt.figure()
 plot_line(active_bias, "active")
 plot_line(baseline_bias, "baseline")
 plt.legend()
-plt.show()
+# plt.ylim([0, 2])
+plt.ylim([0.4, 1])
+plt.savefig(folderName+"active/active_learning.png", bbox_inches="tight", dpi=300)
+plt.close()
 
 print("")
 
