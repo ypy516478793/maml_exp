@@ -9,6 +9,7 @@ Usage Instructions:
 
     5-way, 1-shot omniglot:
         python main.py --datasource=omniglot --metatrain_iterations=60000 --meta_batch_size=32 --update_batch_size=1 --update_lr=0.4 --num_updates=1 --logdir=logs/omniglot5way/
+        python main.py --datasource=omniglot --metatrain_iterations=60000 --meta_batch_size=32 --update_batch_size=1 --update_lr=0.4 --num_updates=1 --logdir=logs/omniglot3way/ --num_classes=3
 
     20-way, 1-shot omniglot:
         python main.py --datasource=omniglot --metatrain_iterations=60000 --meta_batch_size=16 --update_batch_size=1 --num_classes=20 --update_lr=0.1 --num_updates=5 --logdir=logs/omniglot20way/
@@ -61,7 +62,7 @@ flags.DEFINE_integer('update_batch_size', 5, 'number of examples used for inner 
 flags.DEFINE_float('update_lr', 1e-2, 'step size alpha for inner gradient update.') # 0.1 for omniglot
 flags.DEFINE_integer('num_updates', 1, 'number of inner gradient updates during training.')
 flags.DEFINE_bool('allb', True, "if True, inputbs are all data")
-flags.DEFINE_bool('randomLengthTrain', False, "if True, length for inputas are random")
+flags.DEFINE_bool('randomLengthTrain', True, "if True, length for inputas are random")
 
 ## Model options
 flags.DEFINE_string('norm', 'batch_norm', 'batch_norm, layer_norm, or None')
@@ -69,9 +70,9 @@ flags.DEFINE_integer('num_filters', 64, 'number of filters for conv nets -- 32 f
 flags.DEFINE_bool('conv', True, 'whether or not to use a convolutional network, only applicable in some cases')
 flags.DEFINE_bool('max_pool', False, 'Whether or not to use max pooling rather than strided convolutions')
 flags.DEFINE_bool('stop_grad', False, 'if True, do not use second derivatives in meta-optimization (for speed)')
-flags.DEFINE_float('keep_prob', 0.9, 'if not None, used as keep_prob for all layers')
+flags.DEFINE_float('keep_prob', 1, 'if not None, used as keep_prob for all layers')
 # flags.DEFINE_float('beta', 0, 'coefficient for l2_regularization on weights')
-flags.DEFINE_float('beta', 0.001, 'coefficient for l2_regularization on weights')
+flags.DEFINE_float('beta', 0.0001, 'coefficient for l2_regularization on weights')
 flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, use dropout')
 # flags.DEFINE_float('keep_prob', None, 'if not None, used as keep_prob for all layers')
 
@@ -84,10 +85,31 @@ flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest mo
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')
 flags.DEFINE_float('train_update_lr', -1, 'value of inner gradient step step during training. (use if you want to test with a different value)') # 0.1 for omniglot
-flags.DEFINE_bool('load_tensor', True, 'whether we prefetch the data') # equivalent to tf_load_data
+flags.DEFINE_bool('load_tensor', False, 'whether we prefetch the data') # equivalent to tf_load_data
 flags.DEFINE_bool('no_drop_test', True, 'do not drop on testB') # equivalent to tf_load_data
+flags.DEFINE_integer('label_max', 4, 'maximal labels we can require per classes')
+
+class earlyStop():
+    def __init__(self):
+        self.stopping_step = 0
+        self.best_acc = 0
+        self.patience = 50
+        self.should_stop = False
+
+    def step(self, acc):
+        if (acc > self.best_acc):
+            self.stopping_step = 0
+            self.best_acc = acc
+        else:
+            self.stopping_step += 1
+        if self.stopping_step >= self.patience:
+            self.should_stop = True
+        return self.should_stop
 
 def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
+
+    earlyStopper = earlyStop()
+
     SUMMARY_INTERVAL = 100
     SAVE_INTERVAL = 1000
     if FLAGS.datasource == 'sinusoid':
@@ -107,7 +129,7 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
 
     for itr in range(resume_itr, FLAGS.pretrain_iterations + FLAGS.metatrain_iterations):
         feed_dict = {}
-        if 'generate' in dir(data_generator) and FLAGS.datasource == 'sinusoid':
+        if 'generate' in dir(data_generator):
             batch_x, batch_y, amp, phase = data_generator.generate()
 
             if FLAGS.baseline == 'oracle':
@@ -117,7 +139,7 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
                     batch_x[i, :, 2] = phase[i]
 
             # if FLAGS.allb and FLAGS.datasource == 'sinusoid':
-            if FLAGS.allb:
+            if FLAGS.datasource == 'sinusoid' and FLAGS.allb:
                 if FLAGS.randomLengthTrain:
                     K_shots = np.random.choice(num_classes*FLAGS.update_batch_size) + 1
                 else:
@@ -131,6 +153,8 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
                     labela[i] = batch_y[i, a_idx[i, :, 0]]
                 inputb = batch_x
                 labelb = batch_y
+                input_train = inputa
+                label_train = labela
 
                 # h, w, d = batch_x.shape[0], num_classes*FLAGS.update_batch_size, batch_x.shape[2]
                 # task_idx = np.repeat(np.arange(h), w*d).reshape(h,w,d)
@@ -143,11 +167,25 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
                 # inputb = batch_x
                 # labelb = batch_y
             else:
-                inputa = batch_x[:, :num_classes*FLAGS.update_batch_size, :]
-                labela = batch_y[:, :num_classes*FLAGS.update_batch_size, :]
-                inputb = batch_x[:, num_classes*FLAGS.update_batch_size:, :] # b used for testing
-                labelb = batch_y[:, num_classes*FLAGS.update_batch_size:, :]
-            feed_dict = {model.inputa: inputa, model.inputb: inputb,  model.labela: labela, model.labelb: labelb}
+                num_train_val = int(num_classes * data_generator.total_examples_per_class * 0.6)
+                inputa = batch_x[:, :num_train_val, :]
+                inputb = batch_x[:, num_train_val:num_train_val+2, :]           # Use only 2 samples for test to save memory
+                labela = batch_y[:, :num_train_val, :]
+                labelb = batch_y[:, num_train_val:num_train_val+2, :]
+
+                seed_size = FLAGS.update_batch_size
+                start_idx = np.random.choice(int(num_train_val / num_classes) - (seed_size-1), size=(FLAGS.meta_batch_size, 1))
+                train_index = np.array(
+                    [np.arange(start_idx[i] * num_classes, (start_idx[i] + seed_size) * num_classes) for i in
+                     range(FLAGS.meta_batch_size)])
+
+                if FLAGS.randomLengthTrain:
+                    Query_num = np.random.choice(num_classes*FLAGS.update_batch_size) + 1
+                    query_idx = random_query(FLAGS.meta_batch_size, np.arange(num_train_val), Query_num, train_index)
+                    train_index = np.hstack([train_index, query_idx])
+                input_train = np.array([inputa[i, train_index[i], :] for i in range(FLAGS.meta_batch_size)])
+                label_train = np.array([labela[i, train_index[i], :] for i in range(FLAGS.meta_batch_size)])
+            feed_dict = {model.inputa: input_train, model.inputb: inputb,  model.labela: label_train, model.labelb: labelb}
 
         if itr < FLAGS.pretrain_iterations:
             input_tensors = [model.pretrain_op]
@@ -193,6 +231,14 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
             else:
                 print_str = 'Iteration ' + str(itr - FLAGS.pretrain_iterations)
             print_str += ': ' + str(np.mean(prelosses)) + ', ' + str(np.mean(postlosses))
+
+            stop = earlyStopper.step(np.mean(postlosses))
+            if stop:
+                print("Early stopping is trigger at iteration: {} accuracy:{}".format(itr - FLAGS.pretrain_iterations,
+                                                                                      np.mean(postlosses)))
+                import sys
+                sys.exit()
+
             print(print_str)
             prelosses, postlosses = [], []
 
@@ -211,9 +257,9 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
             else:
                 batch_x, batch_y, amp, phase = data_generator.generate(train=False)
                 inputa = batch_x[:, :num_classes*FLAGS.update_batch_size, :]
-                inputb = batch_x[:, num_classes*FLAGS.update_batch_size:, :]
+                inputb = batch_x[:, num_classes*FLAGS.update_batch_size: 2*num_classes*FLAGS.update_batch_size, :]
                 labela = batch_y[:, :num_classes*FLAGS.update_batch_size, :]
-                labelb = batch_y[:, num_classes*FLAGS.update_batch_size:, :]
+                labelb = batch_y[:, num_classes*FLAGS.update_batch_size: 2*num_classes*FLAGS.update_batch_size, :]
                 feed_dict = {model.inputa: inputa, model.inputb: inputb,  model.labela: labela, model.labelb: labelb, model.meta_lr: 0.0}
                 if model.classification:
                     input_tensors = [model.total_accuracy1, model.total_accuracies2[FLAGS.num_updates-1]]
@@ -341,14 +387,15 @@ def add_train(index, query_idx):
         index = np.hstack([index, query_idx])
     return index
 
-def random_query(batch, Train_index, index=None):
-    query_idx = np.zeros([batch, 1], dtype=np.int)
+def random_query(batch, All_index, num_query=1, train_index=None):
+    query_idx = np.zeros([batch, num_query], dtype=np.int)
     for i in range(len(query_idx)):
-        sample_idx = np.random.choice(Train_index)
-        if index is not None:
-            while sample_idx in index[i]:
-                sample_idx = np.random.choice(Train_index)
-        query_idx[i, 0] = sample_idx
+        if train_index is not None:
+            All_choices = np.setdiff1d(All_index, train_index[i])
+        else:
+            All_choices = All_index
+        sample_idx = np.random.choice(All_choices, num_query, replace=False)
+        query_idx[i] = sample_idx
     return query_idx
 
 def test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_points_train=10, random=False):
@@ -392,7 +439,7 @@ def test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_point
             outputs_a[line] = outputs_all[line, index[line], :]
         query_idx, pred, var = query(model, sess, inputs_all, outputs_all, mc_simulation, inputs_a, outputs_a)
         if random:
-            query_idx = random_query(inputs_all.shape[0], Train_index, index)
+            query_idx = random_query(inputs_all.shape[0], Train_index, train_index=index)
         for line in range(len(inputs_all)):
             if statistic_results:
                 bias_array[line, query_time] = np.mean(np.abs( pred[line] - outputs_all[line].reshape(-1)))
@@ -409,7 +456,7 @@ def test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_point
             outputs_a[line] = outputs_all[line, index[line], :]
         query_idx, pred, var = query(model, sess, inputs_all, outputs_all, mc_simulation, inputs_a, outputs_a)
         if random:
-            query_idx = random_query(inputs_all.shape[0], Train_index, index)
+            query_idx = random_query(inputs_all.shape[0], Train_index, train_index=index)
         for line in range(len(index)):
             if statistic_results:
                 bias_array[line, query_time] = np.mean(np.abs( pred[line] - outputs_all[line].reshape(-1)))
@@ -654,12 +701,13 @@ def main(random_seed=1999):
             else:
                 test_num_updates = 10
         else:
-            test_num_updates = 10
+            # test_num_updates = 10
+            test_num_updates = 100
 
     if FLAGS.train == False:
         orig_meta_batch_size = FLAGS.meta_batch_size
-        # always use meta batch size of 1 when testing.  ## why?????
-        # FLAGS.meta_batch_size = 1
+        # always use meta batch size of 1 when testing.  ## Very important!!!
+        FLAGS.meta_batch_size = 1
 
     if FLAGS.datasource == 'sinusoid':
         data_generator = DataGenerator(FLAGS.update_batch_size*2, FLAGS.meta_batch_size)
@@ -765,6 +813,8 @@ def main(random_seed=1999):
         exp_string += "_randomLengthTrain"
     if FLAGS.no_drop_test:
         exp_string += "_noDropTest"
+    if FLAGS.label_max != -1:
+        exp_string += "_labelmax{:d}".format(FLAGS.label_max)
 
     exp_string += extra_string
 
