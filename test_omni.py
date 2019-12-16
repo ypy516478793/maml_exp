@@ -138,7 +138,7 @@ def test_omni_active_Baye(model, sess, exp_string, data_generator, mc_simulation
 
     # train_index = None  # shape: (batch_size, num_classes*labeled_samples_per_class)
     seed_size = FLAGS.update_batch_size
-    start_idx = np.random.choice(int(num_train_val / num_classes), size=(FLAGS.meta_batch_size, 1))
+    start_idx = np.random.choice(int(num_train_val / num_classes) - (seed_size-1), size=(FLAGS.meta_batch_size, 1))
     train_index = np.array([np.arange(start_idx[i]*num_classes, (start_idx[i]+seed_size)*num_classes) for i in range(FLAGS.meta_batch_size)])
     # train_index = np.array([np.random.choice(All_index, size=1, replace=False) for _ in range(FLAGS.meta_batch_size)])
     if train_index is None:
@@ -197,7 +197,7 @@ if __name__ == '__main__':
     # oracle means task id is input (only suitable for sinusoid)
     # flags.DEFINE_string('baseline', "oracle", 'oracle, or None')
     flags.DEFINE_string('baseline', None, 'oracle, or None')
-    flags.DEFINE_bool('active', True, 'if True, use active method to pick training sample, otherwise, random pick.')
+    flags.DEFINE_bool('active', False, 'if True, use active method to pick training sample, otherwise, random pick.')
 
     ## Training options
     flags.DEFINE_integer('pretrain_iterations', 0, 'number of pre-training iterations.')
@@ -211,7 +211,7 @@ if __name__ == '__main__':
     flags.DEFINE_float('update_lr', 1e-2, 'step size alpha for inner gradient update.')  # 0.1 for omniglot
     flags.DEFINE_integer('num_updates', 1, 'number of inner gradient updates during training.')
     flags.DEFINE_bool('allb', True, "if True, inputbs are all data")
-    flags.DEFINE_bool('randomLengthTrain', False, "if True, length for inputas are random")
+    flags.DEFINE_bool('randomLengthTrain', True, "if True, length for inputas are random")
 
     ## Model options
     flags.DEFINE_string('norm', 'batch_norm', 'batch_norm, layer_norm, or None')
@@ -219,8 +219,8 @@ if __name__ == '__main__':
     flags.DEFINE_bool('conv', True, 'whether or not to use a convolutional network, only applicable in some cases')
     flags.DEFINE_bool('max_pool', False, 'Whether or not to use max pooling rather than strided convolutions')
     flags.DEFINE_bool('stop_grad', False, 'if True, do not use second derivatives in meta-optimization (for speed)')
-    flags.DEFINE_float('keep_prob', 0.9, 'if not None, used as keep_prob for all layers')
-    flags.DEFINE_float('beta', 0, 'coefficient for l2_regularization on weights')
+    flags.DEFINE_float('keep_prob', 1, 'if not None, used as keep_prob for all layers')
+    flags.DEFINE_float('beta', 0.0001, 'coefficient for l2_regularization on weights')
     flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, use dropout')
     # flags.DEFINE_float('keep_prob', None, 'if not None, used as keep_prob for all layers')
 
@@ -236,7 +236,7 @@ if __name__ == '__main__':
     flags.DEFINE_float('train_update_lr', -1,
                        'value of inner gradient step step during training. (use if you want to test with a different value)')  # 0.1 for omniglot
     flags.DEFINE_bool('load_tensor', False, 'whether we prefetch the data')  # equivalent to tf_load_data
-
+    flags.DEFINE_bool('no_drop_test', True, 'do not drop on testB')  # equivalent to tf_load_data
     flags.DEFINE_integer('label_max', 4, 'maximal labels we can require per classes')
 
     if FLAGS.datasource == 'sinusoid':
@@ -252,12 +252,13 @@ if __name__ == '__main__':
             else:
                 test_num_updates = 10
         else:
-            test_num_updates = 10
+            # test_num_updates = 10
+            test_num_updates = 100
 
     if FLAGS.train == False:
         orig_meta_batch_size = FLAGS.meta_batch_size
         # always use meta batch size of 1 when testing.
-        # FLAGS.meta_batch_size = 1                                    ########################################### not sure if we can use batch size > 1 in test
+        FLAGS.meta_batch_size = 1                                    ########################################### not sure if we can use batch size > 1 in test (We cannot. Very important!!)
 
     if FLAGS.datasource == 'sinusoid':
         data_generator = DataGenerator(FLAGS.update_batch_size*2, FLAGS.meta_batch_size)
@@ -361,6 +362,10 @@ if __name__ == '__main__':
         exp_string += "_allb"
     if FLAGS.randomLengthTrain:
         exp_string += "_randomLengthTrain"
+    if FLAGS.no_drop_test:
+        exp_string += "_noDropTest"
+    if FLAGS.label_max is not None:
+        exp_string += "_labelmax{:d}".format(FLAGS.label_max)
 
     exp_string += extra_string
 
@@ -376,6 +381,11 @@ if __name__ == '__main__':
         # elif exp_string == "cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000kp0.50":
         #     model_file = 'logs/sine//cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000kp0.50/model69999'
         else:
+
+            # exp_string = "cls_3.mbs_32.ubs_1.numstep1.updatelr0.4batchnorm.mt60000kp1.00.beta0.000_allb_randomLengthTrain_noDropTest_labelmax4"
+            # exp_string = "cls_3.mbs_32.ubs_1.numstep1.updatelr0.4batchnorm.mt60000kp0.90.beta0.000_allb_randomLengthTrain_noDropTest_labelmax4"
+
+
             model_file = tf.train.latest_checkpoint(FLAGS.logdir + '/' + exp_string)
         # model_file = 'logs/sine//cls_5.mbs_25.ubs_10.numstep1.updatelr0.001nonorm.mt70000/model69999'
         if FLAGS.test_iter > 0:
@@ -387,7 +397,8 @@ if __name__ == '__main__':
             saver.restore(sess, model_file)
 
     random_pick = not FLAGS.active
-    test_omni_active_Baye(model, sess, exp_string, data_generator, mc_simulation=20, total_points_train=FLAGS.label_max * FLAGS.num_classes, random_pick=random_pick)
+    total_points_train = FLAGS.label_max * FLAGS.num_classes
+    test_omni_active_Baye(model, sess, exp_string, data_generator, mc_simulation=20, total_points_train=total_points_train, random_pick=random_pick)
 
 
 
@@ -415,3 +426,249 @@ if __name__ == '__main__':
 # end = time.time()
 # print("spent {}".format(end-start))
 # # >>> spent 0.06331181526184082
+
+
+# for exp in range(10):
+#     mc_iteration = 3
+#     train_acc_list = np.zeros([mc_iteration, 101])
+#     train_val_list = np.zeros([mc_iteration, 101])
+#     test_list = np.zeros([mc_iteration, 101])
+#     train_1_val_list = np.zeros([mc_iteration, 101])
+#     train_2_val_list = np.zeros([mc_iteration, 101])
+#     train_3_val_list = np.zeros([mc_iteration, 101])
+#
+#     for i in range(mc_iteration):
+#         feed_init = {model.inputa: inputb, model.inputb: inputb, model.labela: labelb,
+#                      model.labelb: labelb, model.meta_lr: 0.0}
+#         acc0, _ = sess.run([model.total_accuracy1, model.total_accuracies2], feed_init)
+#         train_acc_list[i][0] = acc0
+#         train_val_list[i][0] = acc0
+#         test_list[i][0] = acc0
+#         train_1_val_list[i][0] = acc0
+#         train_2_val_list[i][0] = acc0
+#         train_3_val_list[i][0] = acc0
+#
+#     for i in range(mc_iteration):
+#         feed_dict_line = {model.inputa: input_train, model.inputb: inputb, model.labela: label_train,
+#                           model.labelb: labelb, model.meta_lr: 0.0}
+#         feed_dict_line_1 = {model.inputa: inputa, model.inputb: inputb, model.labela: labela,
+#                             model.labelb: labelb, model.meta_lr: 0.0}
+#         feed_dict_line_2 = {model.inputa: inputb, model.inputb: inputb, model.labela: labelb,
+#                             model.labelb: labelb, model.meta_lr: 0.0}
+#         idx = np.random.choice(range(val_index.shape[-1]), size=3, replace=False)
+#         input_train_val1 = np.concatenate([input_train, input_val[:, idx[:1], :]], axis=1)
+#         label_train_val1 = np.concatenate([label_train, label_val[:, idx[:1], :]], axis=1)
+#         input_train_val2 = np.concatenate([input_train, input_val[:, idx[:2], :]], axis=1)
+#         label_train_val2 = np.concatenate([label_train, label_val[:, idx[:2], :]], axis=1)
+#         input_train_val3 = np.concatenate([input_train, input_val[:, idx[:3], :]], axis=1)
+#         label_train_val3 = np.concatenate([label_train, label_val[:, idx[:3], :]], axis=1)
+#
+#         feed_dict_line_3 = {model.inputa: input_train_val1, model.inputb: inputb, model.labela: label_train_val1,
+#                             model.labelb: labelb, model.meta_lr: 0.0}
+#         feed_dict_line_4 = {model.inputa: input_train_val2, model.inputb: inputb, model.labela: label_train_val2,
+#                             model.labelb: labelb, model.meta_lr: 0.0}
+#         feed_dict_line_5 = {model.inputa: input_train_val3, model.inputb: inputb, model.labela: label_train_val3,
+#                             model.labelb: labelb, model.meta_lr: 0.0}
+#
+#         acc1, accs2 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line)
+#         acc1_1, accs2_1 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line_1)
+#         acc1_2, accs2_2 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line_2)
+#         acc1_3, accs2_3 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line_3)
+#         acc1_4, accs2_4 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line_4)
+#         acc1_5, accs2_5 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line_5)
+#
+#         train_acc_list[i][1:] = accs2
+#         train_val_list[i][1:] = accs2_1
+#         test_list[i][1:] = accs2_2
+#         train_1_val_list[i][1:] = accs2_3
+#         train_2_val_list[i][1:] = accs2_4
+#         train_3_val_list[i][1:] = accs2_5
+#
+#     plt.figure(figsize=(6.4 * 2, 4.8 * 2))
+#     plt.plot(np.mean(train_acc_list, axis=0), "-*", label="train")
+#     plt.fill_between(np.arange(101), np.mean(train_acc_list, axis=0) + np.std(train_acc_list, axis=0),
+#                      np.mean(train_acc_list, axis=0) - np.std(train_acc_list, axis=0), alpha=0.1)
+#     plt.plot(np.mean(train_val_list, axis=0), "-*", label="train+val")
+#     plt.fill_between(np.arange(101), np.mean(train_val_list, axis=0) + np.std(train_val_list, axis=0),
+#                      np.mean(train_val_list, axis=0) - np.std(train_val_list, axis=0), alpha=0.1)
+#     plt.plot(np.mean(test_list, axis=0), "-*", label="test")
+#     plt.fill_between(np.arange(101), np.mean(test_list, axis=0) + np.std(test_list, axis=0),
+#                      np.mean(test_list, axis=0) - np.std(test_list, axis=0), alpha=0.1)
+#     plt.plot(np.mean(train_1_val_list, axis=0), "-*", label="train+1_val")
+#     plt.fill_between(np.arange(101), np.mean(train_1_val_list, axis=0) + np.std(train_1_val_list, axis=0),
+#                      np.mean(train_1_val_list, axis=0) - np.std(train_1_val_list, axis=0), alpha=0.1)
+#     plt.plot(np.mean(train_2_val_list, axis=0), "-*", label="train+2_val")
+#     plt.fill_between(np.arange(101), np.mean(train_2_val_list, axis=0) + np.std(train_2_val_list, axis=0),
+#                      np.mean(train_2_val_list, axis=0) - np.std(train_2_val_list, axis=0), alpha=0.1)
+#     plt.plot(np.mean(train_3_val_list, axis=0), "-*", label="train+3_val")
+#     plt.fill_between(np.arange(101), np.mean(train_3_val_list, axis=0) + np.std(train_3_val_list, axis=0),
+#                      np.mean(train_3_val_list, axis=0) - np.std(train_3_val_list, axis=0), alpha=0.1)
+#     plt.legend()
+#     plt.title("train 100 steps with")
+#     # out_figure = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/omniglot/" + "3way1shot_oriTask_mc{}.png".format(mc_iteration)
+#     out_figure = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/omniglot/3way1shot1kp_normGrad/" + "3way1shot_oriTask_mc{}_{}_exp{}.png".format(
+#         mc_iteration, np.argmax(label_train_val3[0, 3:], axis=-1).tolist(), exp)
+#     plt.savefig(out_figure, bbox_inches="tight", dpi=200)
+#     plt.close()
+
+## similarity (gradient check)
+# with tf.variable_scope("model", reuse=True) as scope:
+#     task_outputa = model.forward(model.inputa, model.weights, reuse=True,
+#                                  keep_prob=model.keep_prob)  # only reuse on the first iter
+#     task_lossa = model.loss_func(task_outputa, model.labela, model.weights, beta=FLAGS.beta)
+#     grads = tf.gradients(task_lossa, list(model.weights.values()))
+#
+# grads_train = sess.run(grads, {model.inputa: input_train, model.labela: label_train, model.meta_lr: 0.0})
+# grads_a = sess.run(grads, {model.inputa: inputa, model.labela: labela, model.meta_lr: 0.0})
+# grads_train_1 = sess.run(grads, {model.inputa: input_train_val1, model.labela: label_train_val1, model.meta_lr: 0.0})
+# grads_train_2 = sess.run(grads, {model.inputa: input_train_val2, model.labela: label_train_val2, model.meta_lr: 0.0})
+# grads_train_3 = sess.run(grads, {model.inputa: input_train_val3, model.labela: label_train_val3, model.meta_lr: 0.0})
+# # >>> idx
+# # >>> Out[43]: array([15, 26, 13])
+# idx = np.array([0, 1, 2])
+# input_train_val3_2 = np.concatenate([input_train, input_val[:, idx[:3], :]], axis=1)
+# label_train_val3_2 = np.concatenate([label_train, label_val[:, idx[:3], :]], axis=1)
+# grads_train_3_2 = sess.run(grads, {model.inputa: input_train_val3_2, model.labela: label_train_val3_2, model.meta_lr: 0.0})
+#
+# grad1 = grads_train[-1]
+# grad2 = grads_a[-1] / 12
+# grad3 = grads_train_1[-1] / 4 * 3
+# grad4 = grads_train_2[-1] / 5 * 3
+# grad5 = grads_train_3[-1] / 6 * 3
+# grad6 = grads_train_3_2[-1] / 6 * 3
+# all_grads = np.vstack([grad1, grad2, grad3, grad4, grad5, grad6])
+#
+# from numpy import linalg as LA
+# similarity = np.zeros([6,6])
+# for i in range(6):
+#     for j in range(6):
+#         similarity[i, j] = all_grads[i].dot(all_grads[j])/ ((LA.norm(all_grads[i], 2)) * (LA.norm(all_grads[j], 2)))
+# # plt.imshow(similarity, cmap='Blues')
+# # plt.colorbar()
+# label = [3, 36, 4, 5, 6, "3*2"]
+# import pandas as pd
+# data = pd.DataFrame(data=similarity, index=label, columns=label)
+# import seaborn as sns
+# sns.heatmap(data, cmap="Blues", annot=True)
+# plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/omniglot/similarity_sns.png", bbox_inches="tight", dpi=300)
+
+
+
+# ## Connect_exp_similarity
+# for exp in range(1, 10):
+#     mc_iteration = 5
+#     train_acc_list = np.zeros([mc_iteration, 101])
+#     train_val_list = np.zeros([mc_iteration, 101])
+#     test_list = np.zeros([mc_iteration, 101])
+#     train_1_val_list = np.zeros([mc_iteration, 101])
+#     train_2_val_list = np.zeros([mc_iteration, 101])
+#     train_3_val_list = np.zeros([mc_iteration, 101])
+#
+#     for i in range(mc_iteration):
+#         feed_init = {model.inputa: inputb, model.inputb: inputb, model.labela: labelb,
+#                      model.labelb: labelb, model.meta_lr: 0.0}
+#         acc0, _ = sess.run([model.total_accuracy1, model.total_accuracies2], feed_init)
+#         train_acc_list[i][0] = acc0
+#         train_val_list[i][0] = acc0
+#         test_list[i][0] = acc0
+#         train_1_val_list[i][0] = acc0
+#         train_2_val_list[i][0] = acc0
+#         train_3_val_list[i][0] = acc0
+#
+#     feed_dict_line = {model.inputa: input_train, model.inputb: inputb, model.labela: label_train,
+#                       model.labelb: labelb, model.meta_lr: 0.0}
+#     feed_dict_line_1 = {model.inputa: inputa, model.inputb: inputb, model.labela: labela,
+#                         model.labelb: labelb, model.meta_lr: 0.0}
+#     feed_dict_line_2 = {model.inputa: inputb, model.inputb: inputb, model.labela: labelb,
+#                         model.labelb: labelb, model.meta_lr: 0.0}
+#     idx = np.random.choice(range(val_index.shape[-1]), size=3, replace=False)
+#     input_train_val1 = np.concatenate([input_train, input_val[:, idx[:1], :]], axis=1)
+#     label_train_val1 = np.concatenate([label_train, label_val[:, idx[:1], :]], axis=1)
+#     input_train_val2 = np.concatenate([input_train, input_val[:, idx[:2], :]], axis=1)
+#     label_train_val2 = np.concatenate([label_train, label_val[:, idx[:2], :]], axis=1)
+#     input_train_val3 = np.concatenate([input_train, input_val[:, idx[:3], :]], axis=1)
+#     label_train_val3 = np.concatenate([label_train, label_val[:, idx[:3], :]], axis=1)
+#
+#     feed_dict_line_3 = {model.inputa: input_train_val1, model.inputb: inputb, model.labela: label_train_val1,
+#                         model.labelb: labelb, model.meta_lr: 0.0}
+#     feed_dict_line_4 = {model.inputa: input_train_val2, model.inputb: inputb, model.labela: label_train_val2,
+#                         model.labelb: labelb, model.meta_lr: 0.0}
+#     feed_dict_line_5 = {model.inputa: input_train_val3, model.inputb: inputb, model.labela: label_train_val3,
+#                         model.labelb: labelb, model.meta_lr: 0.0}
+#
+#     for i in range(mc_iteration):
+#         acc1, accs2 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line)
+#         acc1_1, accs2_1 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line_1)
+#         acc1_2, accs2_2 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line_2)
+#         acc1_3, accs2_3 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line_3)
+#         acc1_4, accs2_4 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line_4)
+#         acc1_5, accs2_5 = sess.run([model.total_accuracy1, model.total_accuracies2], feed_dict_line_5)
+#
+#         train_acc_list[i][1:] = accs2
+#         train_val_list[i][1:] = accs2_1
+#         test_list[i][1:] = accs2_2
+#         train_1_val_list[i][1:] = accs2_3
+#         train_2_val_list[i][1:] = accs2_4
+#         train_3_val_list[i][1:] = accs2_5
+#
+#     plt.figure(figsize=(6.4 * 2, 4.8 * 2))
+#     plt.plot(np.mean(train_acc_list, axis=0), "-*", label="train")
+#     plt.fill_between(np.arange(101), np.mean(train_acc_list, axis=0) + np.std(train_acc_list, axis=0),
+#                      np.mean(train_acc_list, axis=0) - np.std(train_acc_list, axis=0), alpha=0.1)
+#     plt.plot(np.mean(train_val_list, axis=0), "-*", label="train+val")
+#     plt.fill_between(np.arange(101), np.mean(train_val_list, axis=0) + np.std(train_val_list, axis=0),
+#                      np.mean(train_val_list, axis=0) - np.std(train_val_list, axis=0), alpha=0.1)
+#     plt.plot(np.mean(test_list, axis=0), "-*", label="test")
+#     plt.fill_between(np.arange(101), np.mean(test_list, axis=0) + np.std(test_list, axis=0),
+#                      np.mean(test_list, axis=0) - np.std(test_list, axis=0), alpha=0.1)
+#     plt.plot(np.mean(train_1_val_list, axis=0), "-*", label="train+1_val")
+#     plt.fill_between(np.arange(101), np.mean(train_1_val_list, axis=0) + np.std(train_1_val_list, axis=0),
+#                      np.mean(train_1_val_list, axis=0) - np.std(train_1_val_list, axis=0), alpha=0.1)
+#     plt.plot(np.mean(train_2_val_list, axis=0), "-*", label="train+2_val")
+#     plt.fill_between(np.arange(101), np.mean(train_2_val_list, axis=0) + np.std(train_2_val_list, axis=0),
+#                      np.mean(train_2_val_list, axis=0) - np.std(train_2_val_list, axis=0), alpha=0.1)
+#     plt.plot(np.mean(train_3_val_list, axis=0), "-*", label="train+3_val")
+#     plt.fill_between(np.arange(101), np.mean(train_3_val_list, axis=0) + np.std(train_3_val_list, axis=0),
+#                      np.mean(train_3_val_list, axis=0) - np.std(train_3_val_list, axis=0), alpha=0.1)
+#     plt.legend()
+#     plt.title("train 100 steps with")
+#     # out_figure = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/omniglot/" + "3way1shot_oriTask_mc{}.png".format(mc_iteration)
+#     out_figure = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/omniglot/3way1shot1kp_pairwise/" + "exp{}_3way1shot_oriTask_mc{}_{}.png".format(exp,
+#         mc_iteration, np.argmax(label_train_val3[0, 3:], axis=-1).tolist())
+#     plt.savefig(out_figure, bbox_inches="tight", dpi=200)
+#     plt.close()
+#
+#     grads_train = sess.run(grads, {model.inputa: input_train, model.labela: label_train, model.meta_lr: 0.0})
+#     grads_a = sess.run(grads, {model.inputa: inputa, model.labela: labela, model.meta_lr: 0.0})
+#     grads_train_1 = sess.run(grads, {model.inputa: input_train_val1, model.labela: label_train_val1, model.meta_lr: 0.0})
+#     grads_train_2 = sess.run(grads, {model.inputa: input_train_val2, model.labela: label_train_val2, model.meta_lr: 0.0})
+#     grads_train_3 = sess.run(grads, {model.inputa: input_train_val3, model.labela: label_train_val3, model.meta_lr: 0.0})
+#     # >>> idx
+#     # >>> Out[43]: array([15, 26, 13])
+#     idx = np.array([0, 1, 2])
+#     input_train_val3_2 = np.concatenate([input_train, input_val[:, idx[:3], :]], axis=1)
+#     label_train_val3_2 = np.concatenate([label_train, label_val[:, idx[:3], :]], axis=1)
+#     grads_train_3_2 = sess.run(grads, {model.inputa: input_train_val3_2, model.labela: label_train_val3_2, model.meta_lr: 0.0})
+#
+#     grad1 = grads_train[-1]
+#     grad2 = grads_a[-1] / 12
+#     grad3 = grads_train_1[-1] / 4 * 3
+#     grad4 = grads_train_2[-1] / 5 * 3
+#     grad5 = grads_train_3[-1] / 6 * 3
+#     grad6 = grads_train_3_2[-1] / 6 * 3
+#     all_grads = np.vstack([grad1, grad2, grad3, grad4, grad5, grad6])
+#
+#     from numpy import linalg as LA
+#     similarity = np.zeros([6,6])
+#     for i in range(6):
+#         for j in range(6):
+#             similarity[i, j] = all_grads[i].dot(all_grads[j])/ ((LA.norm(all_grads[i], 2)) * (LA.norm(all_grads[j], 2)))
+#     # plt.imshow(similarity, cmap='Blues')
+#     # plt.colorbar()
+#     label = [3, 36, 4, 5, 6, "3*2"]
+#     import pandas as pd
+#     data = pd.DataFrame(data=similarity, index=label, columns=label)
+#     import seaborn as sns
+#     sns.heatmap(data, cmap="Blues", annot=True)
+#     plt.savefig("/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/Figures/omniglot/3way1shot1kp_pairwise/exp{}_similarity_sns_{}.png".format(exp, np.argmax(label_train_val3[0, 3:], axis=-1).tolist()), bbox_inches="tight", dpi=300)
+#     plt.close()

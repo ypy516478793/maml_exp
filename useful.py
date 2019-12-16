@@ -23,7 +23,9 @@ def plot_line(bias, label):
 
 # folderName = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/sine/cls_5.mbs_25.ubs_10.numstep1.updatelr0.01nonorm.mt70000kp0.90.beta0.001_allb_randomLengthTrain/"
 # folderName = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/sine/cls_5.mbs_25.ubs_10.numstep1.updatelr0.01nonorm.mt70000kp0.90.beta0.001_allb/"
-folderName = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/omniglot5way/cls_5.mbs_32.ubs_1.numstep1.updatelr0.4batchnorm.mt60000kp0.90_allb/"
+# folderName = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/omniglot5way/cls_5.mbs_32.ubs_1.numstep1.updatelr0.4batchnorm.mt60000kp0.90_allb/"
+folderName = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/omniglot3way/cls_3.mbs_32.ubs_2.numstep1.updatelr0.4batchnorm.mt60000kp0.90.beta0.000_allb_noDropTest_labelmax4/"
+# folderName = "/home/cougarnet.uh.edu/pyuan2/Projects2019/maml/logs/omniglot3way/cls_3.mbs_32.ubs_2.numstep1.updatelr0.4batchnorm.mt60000kp0.90.beta0.000_allb_randomLengthTrain_noDropTest_labelmax4/zero_initial/"
 # active_bias = read_bias(os.path.join(folderName, "active/bias_array.pkl"))
 active_bias = read_bias(os.path.join(folderName, "active/acc_array.pkl"))
 # baseline_bias = read_bias(os.path.join(folderName, "active_baseline/bias_array.pkl"))
