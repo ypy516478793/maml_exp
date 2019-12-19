@@ -13,6 +13,18 @@ from tqdm import tqdm
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
+def predictive_entropy(mean_prob):
+   eps = 1e-5
+   return -1 * np.sum(mean_prob * np.log(mean_prob + eps), axis=-1)
+
+
+def softmax(x):
+   """Compute softmax values for each sets of scores in x."""
+   if len(x.shape) == 1:
+       return np.exp(x) / np.sum(np.exp(x), axis=0)
+   elif len(x.shape) == 2:
+       return np.exp(x) / np.sum(np.exp(x), axis=-1)[..., np.newaxis]
+
 def query(model, sess, inputa, labela, inputb, labelb, mc_simulation, train_index=None, val_index=None):
     mc_prediction = []
     batch_size, len_val = val_index.shape
@@ -45,9 +57,12 @@ def query(model, sess, inputa, labela, inputb, labelb, mc_simulation, train_inde
         prob_mean = np.nanmean(mc_prediction, axis=0)  # predictions_all shape: [20, 10, 2, 101, 1]
         prob_variance = np.var(mc_prediction, axis=0)  # prob_mean shape: [10, 2, 101, 1]
         # pred = np.argmax(prob_mean, axis=-1)
-        var_one = np.nanmean(prob_variance[-1], axis=-1)
+        # var_one = np.nanmean(prob_variance[-1], axis=-1)
         # var_one = var_calculate_2d(pred, prob_variance)
         # var_one = predictive_entropy(prob_mean)
+        # var_one = np.array([predictive_entropy(softmax(prob_mean[-1, 0, i])) for i in range(prob_mean.shape[2])])[np.newaxis, ...]
+        var_one = np.array([predictive_entropy(softmax(i)) for i in prob_mean[-1]])
+
         # var_one = mutual_info(prob_mean, mc_prediction)
         remove_idx = np.argmax(var_one[:, :len_val], axis=1)
         # query_idx = np.array([val_index[i, remove_idx[i]] for i in range(batch_size)])
@@ -140,6 +155,7 @@ def test_omni_active_Baye(model, sess, exp_string, data_generator, mc_simulation
     seed_size = FLAGS.update_batch_size
     start_idx = np.random.choice(int(num_train_val / num_classes) - (seed_size-1), size=(FLAGS.meta_batch_size, 1))
     train_index = np.array([np.arange(start_idx[i]*num_classes, (start_idx[i]+seed_size)*num_classes) for i in range(FLAGS.meta_batch_size)])
+    # train_index = np.array([np.arange(start_idx[i]*num_classes, (start_idx[i]+seed_size)*num_classes) for i in range(1)])
     # train_index = np.array([np.random.choice(All_index, size=1, replace=False) for _ in range(FLAGS.meta_batch_size)])
     if train_index is None:
         total_step = total_points_train
@@ -197,7 +213,7 @@ if __name__ == '__main__':
     # oracle means task id is input (only suitable for sinusoid)
     # flags.DEFINE_string('baseline', "oracle", 'oracle, or None')
     flags.DEFINE_string('baseline', None, 'oracle, or None')
-    flags.DEFINE_bool('active', False, 'if True, use active method to pick training sample, otherwise, random pick.')
+    flags.DEFINE_bool('active', True, 'if True, use active method to pick training sample, otherwise, random pick.')
 
     ## Training options
     flags.DEFINE_integer('pretrain_iterations', 0, 'number of pre-training iterations.')
@@ -219,7 +235,7 @@ if __name__ == '__main__':
     flags.DEFINE_bool('conv', True, 'whether or not to use a convolutional network, only applicable in some cases')
     flags.DEFINE_bool('max_pool', False, 'Whether or not to use max pooling rather than strided convolutions')
     flags.DEFINE_bool('stop_grad', False, 'if True, do not use second derivatives in meta-optimization (for speed)')
-    flags.DEFINE_float('keep_prob', 1, 'if not None, used as keep_prob for all layers')
+    flags.DEFINE_float('keep_prob', 0.9, 'if not None, used as keep_prob for all layers')
     flags.DEFINE_float('beta', 0.0001, 'coefficient for l2_regularization on weights')
     flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, use dropout')
     # flags.DEFINE_float('keep_prob', None, 'if not None, used as keep_prob for all layers')
@@ -258,7 +274,7 @@ if __name__ == '__main__':
     if FLAGS.train == False:
         orig_meta_batch_size = FLAGS.meta_batch_size
         # always use meta batch size of 1 when testing.
-        FLAGS.meta_batch_size = 1                                    ########################################### not sure if we can use batch size > 1 in test (We cannot. Very important!!)
+        # FLAGS.meta_batch_size = 1                                    ########################################### not sure if we can use batch size > 1 in test (We cannot. Very important!!)
 
     if FLAGS.datasource == 'sinusoid':
         data_generator = DataGenerator(FLAGS.update_batch_size*2, FLAGS.meta_batch_size)
@@ -361,7 +377,7 @@ if __name__ == '__main__':
     if FLAGS.allb:
         exp_string += "_allb"
     if FLAGS.randomLengthTrain:
-        exp_string += "_randomLengthTrain"
+        exp_string += "_newRandomLengthTrain"
     if FLAGS.no_drop_test:
         exp_string += "_noDropTest"
     if FLAGS.label_max is not None:
@@ -384,6 +400,7 @@ if __name__ == '__main__':
 
             # exp_string = "cls_3.mbs_32.ubs_1.numstep1.updatelr0.4batchnorm.mt60000kp1.00.beta0.000_allb_randomLengthTrain_noDropTest_labelmax4"
             # exp_string = "cls_3.mbs_32.ubs_1.numstep1.updatelr0.4batchnorm.mt60000kp0.90.beta0.000_allb_randomLengthTrain_noDropTest_labelmax4"
+            exp_string = "cls_3.mbs_32.ubs_1.numstep1.updatelr0.4batchnorm.mt60000kp1.00.beta0.000_allb_newRandomLengthTrain_noDropTest_labelmax4"
 
 
             model_file = tf.train.latest_checkpoint(FLAGS.logdir + '/' + exp_string)
@@ -398,7 +415,7 @@ if __name__ == '__main__':
 
     random_pick = not FLAGS.active
     total_points_train = FLAGS.label_max * FLAGS.num_classes
-    test_omni_active_Baye(model, sess, exp_string, data_generator, mc_simulation=20, total_points_train=total_points_train, random_pick=random_pick)
+    test_omni_active_Baye(model, sess, exp_string, data_generator, mc_simulation=50, total_points_train=total_points_train, random_pick=random_pick)
 
 
 

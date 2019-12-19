@@ -70,9 +70,10 @@ flags.DEFINE_integer('num_filters', 64, 'number of filters for conv nets -- 32 f
 flags.DEFINE_bool('conv', True, 'whether or not to use a convolutional network, only applicable in some cases')
 flags.DEFINE_bool('max_pool', False, 'Whether or not to use max pooling rather than strided convolutions')
 flags.DEFINE_bool('stop_grad', False, 'if True, do not use second derivatives in meta-optimization (for speed)')
-flags.DEFINE_float('keep_prob', 1, 'if not None, used as keep_prob for all layers')
+flags.DEFINE_float('keep_prob', 0.9, 'if not None, used as keep_prob for all layers')
 # flags.DEFINE_float('beta', 0, 'coefficient for l2_regularization on weights')
-flags.DEFINE_float('beta', 0.0001, 'coefficient for l2_regularization on weights')
+flags.DEFINE_float('beta', 0.001, 'coefficient for l2_regularization on weights')
+# flags.DEFINE_float('beta', 0.0001, 'coefficient for l2_regularization on weights')
 flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, use dropout')
 # flags.DEFINE_float('keep_prob', None, 'if not None, used as keep_prob for all layers')
 
@@ -80,14 +81,14 @@ flags.DEFINE_bool('drop_connect', False, 'if True, use dropconnect, otherwise, u
 flags.DEFINE_bool('log', True, 'if false, do not log summaries, for debugging code.')
 flags.DEFINE_string('logdir', '/tmp/data', 'directory for summaries and checkpoints.')
 flags.DEFINE_bool('resume', False, 'resume training if there is a model available')
-flags.DEFINE_bool('train', True, 'True to train, False to test.')
+flags.DEFINE_bool('train', False, 'True to train, False to test.')
 flags.DEFINE_integer('test_iter', -1, 'iteration to load model (-1 for latest model)')
 flags.DEFINE_bool('test_set', False, 'Set to true to test on the the test set, False for the validation set.')
 flags.DEFINE_integer('train_update_batch_size', -1, 'number of examples used for gradient update during training (use if you want to test with a different number).')
 flags.DEFINE_float('train_update_lr', -1, 'value of inner gradient step step during training. (use if you want to test with a different value)') # 0.1 for omniglot
 flags.DEFINE_bool('load_tensor', False, 'whether we prefetch the data') # equivalent to tf_load_data
 flags.DEFINE_bool('no_drop_test', True, 'do not drop on testB') # equivalent to tf_load_data
-flags.DEFINE_integer('label_max', 4, 'maximal labels we can require per classes')
+flags.DEFINE_integer('label_max', -1, 'maximal labels we can require per classes')
 
 class earlyStop():
     def __init__(self):
@@ -97,7 +98,7 @@ class earlyStop():
         self.should_stop = False
 
     def step(self, acc):
-        if (acc > self.best_acc):
+        if (acc >= self.best_acc):
             self.stopping_step = 0
             self.best_acc = acc
         else:
@@ -233,6 +234,8 @@ def train(model, saver, sess, exp_string, data_generator, resume_itr=0):
             print_str += ': ' + str(np.mean(prelosses)) + ', ' + str(np.mean(postlosses))
 
             stop = earlyStopper.step(np.mean(postlosses))
+            if not model.classification:
+                stop = -stop
             if stop:
                 print("Early stopping is trigger at iteration: {} accuracy:{}".format(itr - FLAGS.pretrain_iterations,
                                                                                       np.mean(postlosses)))
@@ -400,7 +403,7 @@ def random_query(batch, All_index, num_query=1, train_index=None):
 
 def test_line_active_Baye(model, sess, exp_string, mc_simulation=20, total_points_train=10, random=False):
 
-    statistic_results = False
+    statistic_results = True
     if statistic_results:
         inputs_all, outputs_all, amp_test, phase_test = generate_statistic_test()
     else:
@@ -701,8 +704,8 @@ def main(random_seed=1999):
             else:
                 test_num_updates = 10
         else:
-            # test_num_updates = 10
-            test_num_updates = 100
+            test_num_updates = 10
+            # test_num_updates = 100
 
     if FLAGS.train == False:
         orig_meta_batch_size = FLAGS.meta_batch_size
@@ -810,7 +813,7 @@ def main(random_seed=1999):
     if FLAGS.allb:
         exp_string += "_allb"
     if FLAGS.randomLengthTrain:
-        exp_string += "_randomLengthTrain"
+        exp_string += "_newRandomLengthTrain"
     if FLAGS.no_drop_test:
         exp_string += "_noDropTest"
     if FLAGS.label_max != -1:
